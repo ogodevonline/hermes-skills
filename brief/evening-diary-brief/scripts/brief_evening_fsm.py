@@ -4,23 +4,36 @@
 Вечерний дневник с FSM (чтобы можно было отвечать в любой момент).
 Состояние хранится в ~/.hermes/.evening_state.json
 """
-import sys, os, json, yaml, datetime
+import sys, os, json, datetime, subprocess, re
 from pathlib import Path
 
-sys.path.insert(0, '/home/hermes/.hermes/scripts')
 sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
-import importlib.util
-spec = importlib.util.spec_from_file_location("brief_mod", "/home/hermes/.hermes/scripts/brief/__init__.py")
-brief_mod = importlib.util.module_from_spec(spec)
-sys.modules["brief_mod"] = brief_mod
-spec.loader.exec_module(brief_mod)
+from obsidian_utils import write_note, commit_all, get_vault_path
 
 STATE_FILE = Path.home() / ".hermes" / ".evening_state.json"
-DATA_FILE  = Path.home() / ".hermes" / "tasks" / "tasks.yml"
+TODAY = None  # будет установлен из --date YYYY-MM-DD
 
-def load_data():
-    with open(DATA_FILE) as f:
-        return yaml.safe_load(f) or {}
+def run_t(*args):
+    r = subprocess.run(["t", *args], capture_output=True, text=True, timeout=10)
+    return r.stdout.strip()
+
+def parse_tasks_list(output):
+    """Парсит вывод `t list --date YYYY-MM-DD` в список {name, priority, id}."""
+    tasks = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("📭") or line.startswith("ID") or "───" in line:
+            continue
+        # Формат: "⏳ 🟡 [23] 22:00 🍲 Приготовить на ужин суп"
+        # или:     "⏳ 🟡 [23] Название задачи"
+        m = re.match(r'.+\[\s*(\d+)\]\s*(.*)', line)
+        if m:
+            tasks.append({"name": m.group(2).strip(), "priority": "M", "id": m.group(1)})
+    return tasks
+
+def load_data_for_date(date_str):
+    output = run_t("list", "--date", date_str)
+    return {"today": parse_tasks_list(output)}
 
 def load_state():
     if STATE_FILE.exists():
@@ -35,10 +48,11 @@ def clear_state():
         STATE_FILE.unlink()
 
 def build_diary(tasks, answers):
-    today = datetime.date.today().strftime("%d %B %Y (%A)")
+    dt = datetime.datetime.strptime(TODAY, "%Y-%m-%d")
+    today_str = dt.strftime("%d %B %Y (%A)")
     lines = []
     lines.append("# 📖 Вечерний дневник")
-    lines.append(f"**{today}**\n")
+    lines.append(f"**{today_str}**\n")
     lines.append("## 📋 Статусы задач")
     done = 0
     for t in tasks:
@@ -58,16 +72,11 @@ def build_diary(tasks, answers):
     for q in qs:
         a = answers.get(q, "_ _")
         lines.append(f"\n**{q}**  \n  {a}")
-    tom = load_data().get("tomorrow", [])
-    if tom:
-        lines.append("\n## 📅 Завтра")
-        for t in tom:
-            lines.append(f"- {t.get('name','')}")
     lines.append(f"\n_Написано: {datetime.datetime.now().strftime('%H:%M МСК')}_")
     return "\n".join(lines)
 
 def start_new():
-    data = load_data()
+    data = load_data_for_date(TODAY)
     tasks = data.get("today", [])
     state = {
         "phase": "tasks",
@@ -76,7 +85,14 @@ def start_new():
         "tasks": [t.get("name","?") for t in tasks]
     }
     save_state(state)
-    # Первый вопрос
+    if not state["tasks"]:
+        # задач нет — сразу к вопросам
+        state["phase"] = "q1"
+        save_state(state)
+        q = "1. Что сегодня прошло ХОРОШО?"
+        print(q)
+        return q
+    # Первая задача
     tname = state["tasks"][0]
     prio = [t.get("priority","?") for t in tasks if t.get("name")==tname][0]
     q = f'Задача [{prio}] {tname} — статус? (✅ / ⏳ / ❌)'
@@ -86,34 +102,27 @@ def start_new():
 def handle_reply(text):
     state = load_state()
     if not state:
-        # Никого не ждём — запускаем сначала автоматом
         start_new()
         state = load_state()
 
     text = text.strip()
     if state["phase"] == "tasks":
-        # сохраняем ответ на текущую задачу
         cur = state["tasks"][state["task_idx"]]
         state["answers"][cur] = text
         state["task_idx"] += 1
         if state["task_idx"] >= len(state["tasks"]):
-            # задачи кончились → переходим к вопросам
             state["phase"] = "q1"
             q = "1. Что сегодня прошло ХОРОШО?"
         else:
-            # следующая задача
             tname = state["tasks"][state["task_idx"]]
-            tasks_raw = load_data().get("today", [])
+            tasks_raw = load_data_for_date(TODAY).get("today", [])
             prio = [t.get("priority","?") for t in tasks_raw if t.get("name")==tname][0]
             q = f'Задача [{prio}] {tname} — статус? (✅ / ⏳ / ❌)'
         save_state(state)
         return q
 
     elif state["phase"].startswith("q"):
-        # вопрос
         idx = int(state["phase"][1])
-        state["answers"][f"{idx}. ..."] = text  # просто сохраняем номер
-        # правильный ключ — длинный вопрос
         qs = [
             "1. Что сегодня прошло ХОРОШО?",
             "2. Где я облажался / можно лучше?",
@@ -123,37 +132,48 @@ def handle_reply(text):
         ]
         state["answers"][qs[idx-1]] = text
         if idx >= 5:
-            # всё, строим дневник
-            tasks = load_data().get("today", [])
+            tasks = load_data_for_date(TODAY).get("today", [])
             diary = build_diary(tasks, state["answers"])
-            from obsidian_utils import save_note, get_vault_path
-            today = datetime.date.today().isoformat()
-            save_note(f"Дневник/{today}.md", diary)
-            out = get_vault_path() / "Дневник" / f"{today}.md"
+            write_note(f"Дневник/{TODAY}.md", diary)
+            commit_all(f"diary {TODAY}")
+            out = get_vault_path() / "Дневник" / f"{TODAY}.md"
             clear_state()
             result = f"\n{'='*60}\n{diary}\n{'='*60}\n\n✅ Дневник сохранён: {out}"
             return result
         else:
             state["phase"] = f"q{idx+1}"
             save_state(state)
-            return qs[idx]  # следующий вопрос
+            return qs[idx]
 
     return "Продолжаем..."
 
 # CLI interface
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--start":
+    # Парсим --date YYYY-MM-DD (если есть)
+    date_arg = None
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--date" and i+1 < len(args):
+            date_arg = args[i+1]
+            # убираем --date и значение из списка
+            args = args[:i] + args[i+2:]
+            break
+    if date_arg:
+        TODAY = date_arg
+    else:
+        TODAY = datetime.date.today().isoformat()
+
+    if len(args) > 0 and args[0] == "--start":
         start_new()
-    elif len(sys.argv) > 1 and sys.argv[1] == "--answer":
-        reply = " ".join(sys.argv[2:])
+    elif len(args) > 0 and args[0] == "--answer":
+        reply = " ".join(args[1:])
         print(handle_reply(reply))
     else:
-        # Без аргументов — если стейт есть, показываем что ждём, если нет — запускаем
         if load_state():
             s = load_state()
             if s["phase"] == "tasks":
                 t = s["tasks"][s["task_idx"]]
-                tasks = load_data().get("today", [])
+                tasks = load_data_for_date(TODAY).get("today", [])
                 prio = [x.get("priority","?") for x in tasks if x.get("name")==t][0]
                 print(f'Жду ответ на: [{prio}] {t} (✅/⏳/❌)')
             else:

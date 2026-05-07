@@ -400,25 +400,55 @@ def send_telegram_chunks(chunks: list[str]) -> bool:
 
 # ===== GitHub Trending =====
 
-def get_github_trending() -> list[dict]:
-    """GitHub trending repos за последние 7 дней с подробными данными."""
-    now = datetime.now(timezone.utc)
-    week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+def get_github_trending(since: str = "daily") -> list[dict]:
+    """GitHub trending repos за выбранный период (daily/weekly/monthly) через парсинг HTML + API."""
+    # 1. Парсим github.com/trending для получения списка репозиториев
     raw, _ = _run_command(
-        f"curl -s --max-time 10 "
-        f"'https://api.github.com/search/repositories?q=created:>={week_ago}&sort=stars&order=desc&per_page=5' "
+        f"curl -s --max-time 15 "
+        f"'https://github.com/trending?since={since}' "
         "2>/dev/null"
     )
     if not raw:
         return []
-    try:
-        data = json.loads(raw)
-        items = []
-        for r in data.get("items", [])[:5]:
+
+    # 2. Извлекаем имена репозиториев из HTML
+    repo_pattern = re.compile(r'href="/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"')
+    all_hrefs = repo_pattern.findall(raw)
+
+    # Фильтруем: только owner/repo, не sponsors/trending/apps
+    skip_prefixes = ("/sponsors/", "/trending/", "/apps/", "/settings/")
+    repos = []
+    seen = set()
+    for href in all_hrefs:
+        path = href.split('"')[1]  # "/owner/repo"
+        if any(path.startswith(p) for p in skip_prefixes):
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        repos.append(path.strip("/"))
+
+    # Берём первые 7 репо с периода — не все дойдут до API (могут быть ошибки)
+    repos = repos[:7]
+
+    # 3. Для каждого репозитория получаем детали через GitHub API
+    items = []
+    for repo_name in repos:
+        raw_repo, _ = _run_command(
+            f"curl -s --max-time 5 "
+            f"'https://api.github.com/repos/{repo_name}' "
+            "2>/dev/null"
+        )
+        if not raw_repo:
+            continue
+        try:
+            r = json.loads(raw_repo)
+            if "message" in r and r["message"] == "Not Found":
+                continue
             items.append({
-                "name": r.get("full_name", "?"),
-                "url": r.get("html_url", ""),
-                "lang": r.get("language", ""),
+                "name": r.get("full_name", repo_name),
+                "url": r.get("html_url", f"https://github.com/{repo_name}"),
+                "lang": r.get("language") or "",
                 "desc": (r.get("description") or ""),
                 "stars": r.get("stargazers_count", 0),
                 "forks": r.get("forks_count", 0),
@@ -427,9 +457,36 @@ def get_github_trending() -> list[dict]:
                 "created": r.get("created_at", ""),
                 "updated": r.get("updated_at", ""),
             })
-        return items
-    except:
-        return []
+        except:
+            continue
+
+    return items
+
+
+def get_github_trending_merged() -> list[dict]:
+    """Собрать trending за daily + weekly + monthly, объединить, удалить дубликаты, отсортировать по звёздам."""
+    print("🐙 GitHub Trending (daily + weekly + monthly)...")
+    all_items = []
+
+    for period in ["daily", "weekly", "monthly"]:
+        print(f"   Период: {period}...")
+        items = get_github_trending(since=period)
+        print(f"      {len(items)} репозиториев")
+        all_items.extend(items)
+
+    # Убираем дубликаты по имени репозитория
+    seen = set()
+    unique = []
+    for item in all_items:
+        if item["name"] not in seen:
+            seen.add(item["name"])
+            unique.append(item)
+
+    # Все уникальные, сортируем по звёздам
+    unique.sort(key=lambda x: x.get("stars", 0), reverse=True)
+
+    print(f"   ✅ Итого уникальных: {len(unique)}")
+    return unique
 
 
 def github_summarize(repos: list[dict]) -> list[dict]:
@@ -669,18 +726,19 @@ def format_digest(groups: dict, max_per_group: int = 4) -> str:
             topics = item.get("topics", [])
             topics_s = f" 🏷️{', '.join(topics[:3])}" if topics else ""
             
-            lines.append(f"  • <a href=\"{item['url']}\">{html_escape(item['name'])}</a>{lang} ⭐{item['stars']}{forks_s}{issues_s}{topics_s}")
-            
-            # Полное описание
+            # Краткое описание (60 символов) — в строку с названием
+            desc_short = ""
             if item.get("desc"):
-                desc = html_escape(item["desc"][:200])
-                lines.append(f"    📄 <i>{desc}</i>")
+                d = html_escape(item["desc"][:80])
+                desc_short = f" — {d}"
             
+            lines.append(f"  • <a href=\"{item['url']}\">{html_escape(item['name'])}</a>{lang} ⭐{item['stars']}{forks_s}{desc_short}{topics_s}")
+
             # AI-аннотация (если есть)
             if item.get("gh_summary"):
                 summary_h = html_escape(item["gh_summary"])
                 lines.append(f"    💡 {summary_h}")
-            
+
             lines.append("")
         lines.append("━━━━━━━━━━━━━━━━━━━")
         lines.append("")
@@ -749,27 +807,39 @@ def main():
     print(f"📡 News Digest — {datetime.now(MSK).strftime('%H:%M МСК')}")
     print("=" * 40)
 
-    # 1. Получаем статьи из blogwatcher (максимум 20 за 24ч — для производительности)
+    # 0. Сканируем blogwatcher перед сбором дайджеста
+    print("🔄 Запуск blogwatcher-cli scan...")
+    scan_out, scan_err = _run_command("blogwatcher-cli scan", timeout=120)
+    if scan_err and "error" in scan_err.lower():
+        print(f"⚠️ Ошибка сканирования blogwatcher: {scan_err[:200]}")
+    else:
+        new_count = 0
+        for line in scan_out.split("\n"):
+            if "new" in line.lower() and "article" in line.lower():
+                import re as _re
+                nums = _re.findall(r"\d+", line)
+                if nums:
+                    new_count = int(nums[-1])
+                break
+        if new_count:
+            print(f"   ✅ Найдено новых статей: {new_count}")
+        else:
+            print(f"   ✅ Сканирование завершено")
+
+    # 1. Получаем статьи из blogwatcher (максимум 30 — для производительности)
     print("📰 Загрузка статей из blogwatcher DB...")
-    articles = get_recent_articles(hours=24, limit=20)
+    articles = get_recent_articles(hours=24, limit=30)
     print(f"   Найдено: {len(articles)} статей за 24ч")
     
-    # Проверка на устаревшие данные
+    # Fallback: если за 24ч пусто — расширяем окно
     if not articles:
-        # Попробуем проверить, есть ли вообще свежие статьи за последние 48ч
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            cur.execute("SELECT MAX(published_date) FROM articles")
-            max_date = cur.fetchone()[0]
-            conn.close()
-            if max_date:
-                print(f"   ⚠️ Последняя статья от {max_date} — возможно blogwatcher не сканировал давно")
-                print(f"   💡 Запусти: blogwatcher-cli scan")
-            else:
-                print("   ⚠️ БД blogwatcher пуста — нужно добавить источники и запустить scan")
-        except Exception as e:
-            print(f"   ⚠️ Не удалось проверить актуальность БД: {e}")
+        print("   ⚠️ За 24ч ничего нет, пробуем 48ч...")
+        articles = get_recent_articles(hours=48, limit=30)
+        print(f"   Найдено: {len(articles)} статей за 48ч")
+    if not articles:
+        print("   ⚠️ И за 48ч пусто, пробуем 72ч...")
+        articles = get_recent_articles(hours=72, limit=30)
+        print(f"   Найдено: {len(articles)} статей за 72ч")
 
     # 1.5 Фильтруем мусор
     before = len(articles)
@@ -810,9 +880,8 @@ def main():
     else:
         print("ℹ️ Нет релевантных новостей из blogwatcher — проверяем GitHub Trending")
 
-    # 5. Добавляем GitHub Trending с AI-аннотациями
-    print("🐙 GitHub Trending...")
-    gh = get_github_trending()
+    # 5. Добавляем GitHub Trending с AI-аннотациями (daily + weekly + monthly)
+    gh = get_github_trending_merged()
     if gh:
         # AI-аннотации для репозиториев
         gh = github_summarize(gh)

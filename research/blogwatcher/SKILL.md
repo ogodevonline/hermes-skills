@@ -75,6 +75,46 @@ The binary name changed from `blogwatcher` to `blogwatcher-cli`.
 - Mark all read: `blogwatcher-cli read-all`
 - Mark all read for a blog: `blogwatcher-cli read-all --blog "My Blog" --yes`
 
+## Feed Maintenance
+
+RSS feeds break over time — sites change domains, block scrapers, or drop RSS entirely. Regular maintenance prevents silent failures (scan returns 0 new articles, but you think nothing's happening).
+
+### Diagnostics
+
+Check all feeds at once — run `blogwatcher-cli scan` and look for `Error:` lines. Healthy feeds show `Source: RSS | Found: N | New: N`.
+
+Check individual feeds with curl:
+```bash
+# HTTP status codes: 200=OK, 301=redirected, 403/404=broken, 000=no response
+curl -sI -o /dev/null -w '%{http_code}' --max-time 5 --user-agent "Mozilla/5.0" "https://example.com/feed.xml"
+```
+
+Common failure codes:
+| Code | Meaning | Action |
+|------|---------|--------|
+| 301/308 | Redirected | Follow with `-L` to find new URL, then `remove` + `add` with new feed URL |
+| 403 | Blocked (IP/UA) | Try different User-Agent. If still blocked, find alternative source |
+| 404 | Removed/moved | Feed no longer exists, find replacement |
+| 530 | Site dead | Site is gone (e.g. FireEye → Trellix acquisition) |
+| 000 | No response / DNS / TLS | DNS not resolving or TLS handshake fails — remove source |
+
+### Finding replacement feeds
+
+When a feed dies, find a working replacement:
+
+1. **Search for the site's RSS**: `web_search("{source name} RSS feed")` — official RSS pages list feed URLs
+2. **Check redirect destinations**: `curl -sI -L URL` shows where a 301/308 redirects to
+3. **Try common URLs**: Some sites offer RSS at `/feed/`, `/rss/`, `/atom.xml`, `/feed.xml` — try variations
+4. **Replace with similar content**: Dead security blog → Threatpost/CyberScoop/Krebs. Dead Python blog → RealPython/Python Insider blog
+
+### Updating a feed
+
+```bash
+blogwatcher-cli remove "Old Blog Name" --yes
+blogwatcher-cli add "New Blog Name" "https://example.com" --feed-url "https://example.com/feed.xml"
+blogwatcher-cli scan "New Blog Name"  # verify
+```
+
 ## Environment Variables
 
 All flags can be set via environment variables with the `BLOGWATCHER_` prefix:

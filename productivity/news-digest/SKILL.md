@@ -10,8 +10,7 @@ description: Обеденный дайджест новостей — blogwatche
 переводит английские заголовки на русский через KiloCode AI, добавляет AI-аннотации
 и GitHub Trending, отправляет в Telegram в HTML-формате.
 
-> **⚠️ Git:** Директория skills уже под git. Перед любыми изменениями — `git status`.
-> Для отката: `git checkout -- news_digest.py`
+> **⚠️ Git:** Скилы на GitHub: `ogodevonline/hermes-skills-productivity`. Для отката: `git log`, `git checkout`.
 
 ## Работа с контентом статей
 
@@ -53,13 +52,13 @@ blogwatcher — единственный источник данных для д
 ## Pipeline
 
 ```
-blogwatcher DB -> get_recent_articles(24h, 20)  # лимит 20 для производительности
+blogwatcher-cli scan -> blogwatcher DB -> get_recent_articles(24h→48h→72h, 30)
     -> is_blacklisted() отсев мусора
     -> matches_keywords() фильтрация (с \b word boundaries для коротких ключей)
     -> categorize() группировка по категориям
     -> translate_articles() батчевый перевод через KiloCode (батчи по 10)
     -> summarize_articles() AI-аннотации (батчи по 10, макс 20 статей по приоритету категорий)
-    -> get_github_trending() GitHub API (5 repos с topics, forks, issues)
+    -> get_github_trending_merged() парсинг github.com/trending (daily+weekly+monthly), мерж, топ-7 по звёздам
     -> github_summarize() AI-аннотации для репозиториев (чем полезен, для кого)
     -> format_digest() HTML-форматирование (макс 4 статьи на категорию)
     -> split_chunks(max_len=3800) -> send_telegram_chunks(parse_mode=HTML)
@@ -94,15 +93,12 @@ blogwatcher DB -> get_recent_articles(24h, 20)  # лимит 20 для прои�
 
 ### GitHub Trending
 
-- URL: `GET https://api.github.com/search/repositories?q=created:>=...&sort=stars&order=desc&per_page=5`
-- Период: 7 дней
-- Показывается первой секцией (всегда наверху)
-- **Расширенные данные:** topics, forks, issues, полное описание (200 символов)
-- **AI-аннотации:** каждый репозиторий получает 2-3 предложения на русском: чем полезен, для кого, почему набрал звёзды
-- Формат вывода:
+- **Источник:** парсинг `github.com/trending?since=daily|weekly|monthly` — три периода
+- **Объединение:** репозитории со всех трёх периодов мержатся, дубликаты удаляются, сортировка по звёздам
+- **Лимит:** все уникальные репозитории (сейчас ~16), сортировка по звёздам
+- **Формат вывода:**
   ```
-  • repo [Lang] ⭐N 🍴N 🐛N 🏷️topic1, topic2
-    📄 Полное описание
+  • <a href="url">repo</a> [Lang] ⭐N 🍴N — Краткое описание (80 символов) 🏷️topic1
     💡 AI-аннотация (для кого, чем полезен)
   ```
 
@@ -155,12 +151,14 @@ SCRIPT_COMMANDS = {
 2. **KiloCode free модели возвращают null в non-streaming** — все API вызовы обязательно с `stream: true`. Non-streaming даёт `content: null` на большинстве free моделей.
 3. **DeepSeek модели не работают через KiloCode** — не трать время на `deepseek/deepseek-v4-flash` или `deepseek/deepseek-v3.2`. Используй `kilo-auto/small`.
 4. **Суммаризация >10 статей в одном батче** — KiloCode возвращает меньше результатов чем запрошено. Разбивай на батчи по 10. То же касается перевода — батчи >10 заголовков могут зависнуть, так как KiloCode пропорционально замедляется (5 заголовков ~7с, 10 ~22с, 26+ таймаут).
-5. **Blogwatcher не сканировал >1 дня** — БД устаревает. Скрипт проверяет MAX(published_date) и выводит предупреждение если статей нет. Решение: `blogwatcher-cli scan`.
+5. **Blogwatcher scan и пустой дайджест** — если scan не нашёл новых статей (битые фиды, старые данные), скрипт пробует расширить окно: 24ч → 48ч → 72ч. Лимит статей увеличен до 30. Если и это пусто — проверь фиды через `blogwatcher-cli scan | grep -i error`. Многие RSS-фиды со временем ломаются (301, 403, 404) — нужна периодическая чистка.
 6. **GitHub API rate limit** — без токена ~60 req/h, для одного запуска в день — ок.
 7. **Ошибка перевода** — заголовки остаются английскими, не падаем. Скрипт пробует батч, затем поштучно, затем пропускает.
 8. **Мусорные статьи** — blacklist расширяемый. Если видишь промокоды/спам в дайджесте — добавь слово/домен в `BLACKLIST_WORDS` или `BLACKLIST_DOMAINS`.
-9. **Лимит статей 20 — не 60** — при 60+ статьях скрипт не укладывается в 180s таймаут (6+ батчей суммаризации + перевод). 20 статей = 2-3 батча, укладывается в ~2 минуты. Если статей много, приоритет по категориям: security, osint, python_ai, policy, russia, tools, general.
+9. **Лимит статей 30 — не 60 и не 20** — лимит увеличен с 20 до 30. При большом количестве статей приоритет по категориям: security, osint, python_ai, policy, russia, tools, general.
 10. **Word boundaries для коротких ключей** — "ai", "ml", "ru", "us", "eu" матчатся как подстроки (в "said", "available", "группа"). Всегда используй `\bai\b` (с re.search) в `matches_keywords()` и `categorize()` для ключей ≤3 символов. Аналогично для "ai" в заголовках новостей — иначе BBC World статьи про китов и нефть попадают в Python/AI категорию.
 11. **Markdown-код в ответе KiloCode** — API может возвращать `` ```json ... ``` `` вместо чистого JSON. Все парсеры (перевод, суммаризация, GitHub) сначала очищают ответ: `cleaned = result.strip()` + удаление markdown-блоков перед JSON-парсингом.
 12. **Жадный vs нежадный regex для JSON-массивов** — `re.search(r'\[.*?\]', text, re.DOTALL)` находит первое вхождение `]`, обрезая массив. Используй `re.search(r'\[.*\]', text, re.DOTALL)` (жадный) для корректного захвата всех элементов.
 13. **Streaming обязателен** для KiloCode — free/small модели возвращают `content: null` в non-streaming режиме. Параметр `stream: True` и итерация `resp.iter_lines()`.
+14. **Blogwatcher scan требует таймаут 120с** — вызов `blogwatcher-cli scan` в начале `main()` использует `timeout=120`, а не стандартные 15с из `_run_command()`. При редактировании кода убедись, что таймаут остаётся большим — некоторые источники (BBC, блоги) загружаются медленно.
+15. **GitHub Trending stale data** — старый запрос `created:>=7дней` через Search API возвращал одни и те же репозитории несколько дней (топ за неделю почти не меняется). Реальный github.com/trending показывает репозитории по относительному приросту звёзд. Решение: парсить `github.com/trending?since=daily|weekly|monthly` HTML, извлекать owner/repo через regex `href="/owner/repo"`, дёргать `/repos/{owner}/{name}` для деталей. `get_github_trending_merged()` объединяет все три периода, убирает дубликаты, сортирует по звёздам. GitHub API rate limit без токена ~60 req/h — для одного запуска (макс 21 запрос) ок.

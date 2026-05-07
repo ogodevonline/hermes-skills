@@ -110,10 +110,20 @@ WantedBy=multi-user.target
 
 ## Pitfalls
 
-1. **Не запускать вручную!** — systemd управляет единственным экземпляром.
-2. **При миграции скриптов теряются патчи** — после переноса проверь diff.
-3. **Категория в пути!** — `get_script_dir()` строит путь как `SKILLS_DIR / category / skill / "scripts"`. Забыть категорию = путь не найдётся.
-4. **Авто-перезагрузка** — только при изменении `COUNT(*)` в `cron_jobs`.
-5. **Скрипты должны быть исполняемыми** — `chmod +x` для *.py
-6. **Демон не останавливается при ошибке скрипта** — только логирует
-7. **/usr/bin/python3 → python3.12** — не путать с python3 из venv (3.11).
+1. **⚠️ ВСЕГДА проверяй task-manager перед созданием Hermes cronjob!** 
+   Расписание в SQLite (`~/.hermes/tasks/tasks.db`, таблица `cron_jobs`):
+   - Evening Brief → script `brief_evening`, `0 18 * * *`
+   - Morning Brief → script `brief`, `0 3 * * *`
+   - News Digest → script `news_digest`, `30 10 * * *`
+   - Task Migrate → script `task_migrate`, `1 21 * * *`
+   - Reminders → script `reminders`, `0 5-19 * * *`
+   
+   Если пользователь просит настроить периодическую задачу — сначала: `sqlite3 ~/.hermes/tasks/tasks.db "SELECT * FROM cron_jobs"`. Если уже есть — не плоди дубликат.
+
+2. **Не запускать вручную!** — systemd управляет единственным экземпляром.
+3. **При миграции скриптов теряются патчи** — после переноса проверь diff.
+4. **Категория в пути!** — `get_script_dir()` строит путь как `SKILLS_DIR / category / skill / "scripts"`. Забыть категорию = путь не найдётся.
+5. **Авто-перезагрузка** — только при изменении `COUNT(*)` в `cron_jobs`.
+6. **Скрипты должны быть исполняемыми** — `chmod +x` для *.py
+7. **Демон не останавливается при ошибке скрипта** — только логирует
+8. **/usr/bin/python3 → python3.12** — не путать с python3 из venv (3.11).

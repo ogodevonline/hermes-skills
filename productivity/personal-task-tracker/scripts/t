@@ -2,9 +2,11 @@
 """CLI трекер задач и привычек (SQLite)."""
 import sqlite3, sys, os, argparse, datetime, shutil
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DB = Path.home() / ".hermes" / "tasks" / "tasks.db"
 DB.parent.mkdir(parents=True, exist_ok=True)
+MSK = ZoneInfo("Europe/Moscow")
 
 def get_db():
     conn = sqlite3.connect(str(DB))
@@ -55,16 +57,36 @@ def add_days_column():
     conn.close()
 
 def today():
-    return datetime.date.today().isoformat()
+    return datetime.datetime.now(MSK).date().isoformat()
 
 def tomorrow():
     return (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+
+def tomorrow_msk():
+    return (datetime.datetime.now(MSK).date() + datetime.timedelta(days=1)).isoformat()
+
+def parse_date(s):
+    """Парсит 'today', 'tomorrow', 'сегодня', 'завтра' в ISO-дату.
+       Валидирует YYYY-MM-DD формат. Возвращает None при невалидной дате."""
+    if not s:
+        return None
+    s = s.strip().lower()
+    if s in ("today", "сегодня"):
+        return today()
+    if s in ("tomorrow", "завтра"):
+        return tomorrow_msk()
+    # проверить что это валидная YYYY-MM-DD дата
+    try:
+        datetime.datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except ValueError:
+        return None
 
 # ─── Задачи ─────────────────────────────────
 
 def cmd_add(args):
     conn = get_db()
-    date = args.due or today()
+    date = parse_date(args.due) or today()
     conn.execute(
         "INSERT INTO tasks (name, priority, category, due_date, reminder, duration) VALUES (?,?,?,?,?,?)",
         (args.name, args.priority.upper(), args.category, date, args.reminder, args.duration)
@@ -81,7 +103,7 @@ def cmd_add(args):
 
 def cmd_done(args):
     conn = get_db()
-    now = datetime.datetime.now().strftime("%H:%M")
+    now = datetime.datetime.now(MSK).strftime("%H:%M")
     cur = conn.execute(
         "UPDATE tasks SET status='done', done_at=? WHERE id=? AND status='pending'",
         (now, args.id)
@@ -115,9 +137,10 @@ def cmd_list(args):
             "SELECT * FROM tasks WHERE status='backlog' ORDER BY priority, id"
         ).fetchall()
     elif args.date:
+        lookup_date = parse_date(args.date) or args.date
         rows = conn.execute(
             "SELECT * FROM tasks WHERE due_date=? ORDER BY CASE priority WHEN 'H' THEN 0 WHEN 'M' THEN 1 ELSE 2 END, id",
-            (args.date,)
+            (lookup_date,)
         ).fetchall()
     elif args.all:
         rows = conn.execute(
@@ -149,7 +172,7 @@ def cmd_list(args):
 def cmd_postpone(args):
     """Перенести задачу на другой день."""
     conn = get_db()
-    new_date = args.date or tomorrow()
+    new_date = parse_date(args.date) or tomorrow_msk()
     cur = conn.execute(
         "UPDATE tasks SET due_date=?, carry_over=COALESCE(carry_over,0)+1 WHERE id=? AND status='pending'",
         (new_date, args.id)
@@ -158,15 +181,13 @@ def cmd_postpone(args):
         t = conn.execute("SELECT name, carry_over FROM tasks WHERE id=?", (args.id,)).fetchone()
         carries = t["carry_over"]
         print(f"➡️  [{args.id}] {t['name']} → {new_date} (перенос #{carries})")
-        if carries >= 3:
-            print("⚠️  Лимит переносов превышен — задача уйдёт в backlog после migrate")
     else:
         print("⚠️ Задача не найдена или уже закрыта")
     conn.commit()
     conn.close()
 
 def cmd_migrate(args):
-    """Перенести просроченные pending-задачи на завтра."""
+    """Перенести просроченные pending-задачи на завтра (по МСК)."""
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM tasks WHERE due_date<? AND status='pending'",
@@ -177,12 +198,9 @@ def cmd_migrate(args):
         return
     for r in rows:
         carries = (r["carry_over"] or 0) + 1
-        if carries >= 3:
-            conn.execute("UPDATE tasks SET status='backlog', carry_over=? WHERE id=?", (carries, r["id"]))
-            print(f"📦 [{r['id']}] {r['name']} — превышен лимит переносов → backlog")
-        else:
-            conn.execute("UPDATE tasks SET due_date=?, carry_over=? WHERE id=?", (tomorrow(), carries, r["id"]))
-            print(f"➡️  [{r['id']}] {r['name']} → завтра (перенос #{carries})")
+        conn.execute("UPDATE tasks SET due_date=?, carry_over=? WHERE id=?",
+                     (today(), carries, r["id"]))
+        print(f"➡️  [{r['id']}] {r['name']} → сегодня (перенос #{carries})")
     conn.commit()
     conn.close()
 
@@ -190,7 +208,7 @@ def cmd_migrate(args):
 
 def cmd_habits(args):
     conn = get_db()
-    weekday = datetime.date.today().strftime("%a")  # Mon, Tue, ...
+    weekday = datetime.datetime.now(MSK).strftime("%a")  # Mon, Tue, ...
     all_rows = conn.execute("SELECT * FROM habits ORDER BY sort_order, id").fetchall()
     if not all_rows:
         print("📭 Нет привычек")
@@ -221,23 +239,9 @@ def cmd_habits(args):
     print(f"\n  Итого: {total_done}/{len(rows)} подходов{suffix}")
     conn.close()
 
-def cmd_habit_add(args):
-    conn = get_db()
-    days = args.days or "*"
-    max_order = conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM habits").fetchone()[0]
-    conn.execute(
-        "INSERT INTO habits (name, time, sort_order, days) VALUES (?,?,?,?)",
-        (args.name, args.time, max_order, days)
-    )
-    conn.commit()
-    hid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    days_str = f" [{days}]" if days != "*" else ""
-    print(f"✅ Привычка добавлена: {args.name}{days_str}  (id={hid})")
-    conn.close()
-
 def cmd_habit_done(args):
     conn = get_db()
-    now = datetime.datetime.now().strftime("%H:%M")
+    now = datetime.datetime.now(MSK).strftime("%H:%M")
     conn.execute(
         "INSERT INTO habit_log (habit_id, date, done, done_at) VALUES (?,?,1,?)",
         (args.id, today(), now)
@@ -253,6 +257,20 @@ def cmd_habit_done(args):
     else:
         print("⚠️ Привычка не найдена")
     conn.commit()
+    conn.close()
+
+def cmd_habit_add(args):
+    conn = get_db()
+    days = args.days or "*"
+    max_order = conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM habits").fetchone()[0]
+    conn.execute(
+        "INSERT INTO habits (name, time, sort_order, days) VALUES (?,?,?,?)",
+        (args.name, args.time, max_order, days)
+    )
+    conn.commit()
+    hid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    days_str = f" [{days}]" if days != "*" else ""
+    print(f"✅ Привычка добавлена: {args.name}{days_str}  (id={hid})")
     conn.close()
 
 def cmd_habit_rm(args):
@@ -410,7 +428,7 @@ def main():
     p.add_argument("id", type=int)
     p.add_argument("-d", "--date", help="Новая дата (ГГГГ-ММ-ДД), по умолчанию завтра")
 
-    sub.add_parser("migrate", help="Перенести просрочку на завтра")
+    sub.add_parser("migrate", help="Перенести просрочку на сегодня")
     sub.add_parser("status", help="Короткий статус для Hermes")
     sub.add_parser("migrate-from-yaml", help="Импорт из YAML")
 

@@ -292,6 +292,22 @@ def cmd_save(args):
     print(f"   Путь: {book_name}/{session_dir}/")
     print(f"   level={state.get('level')}, total_sessions={state.get('total_sessions')}")
 
+    # Отправка в Telegram
+    if getattr(args, "send", False):
+        from subprocess import run
+        book_title = ""
+        if book_data:
+            book_title = book_data.get("title", "")
+        header = f"📖 **English — {book_title}, Сессия {session:03d}**" if book_title else f"📖 **English — Сессия {session:03d}**"
+        run([
+            "python3",
+            str(Path.home() / ".hermes" / "scripts" / "telegram_send_lesson.py"),
+            "--header", header,
+            "--text", args.text,
+            "--vocab", args.vocab if args.vocab else "",
+            "--grammar", args.grammar,
+        ], timeout=30)
+
 
 def cmd_status(args):
     """Показать краткий статус."""
@@ -347,6 +363,7 @@ def main():
     p_save.add_argument("--grammar", required=True, help="Содержимое grammar.md (файл или строка)")
     p_save.add_argument("--vocab", default="", help="Содержимое vocabulary.md (файл или строка)")
     p_save.add_argument("--summary", default="", help="Новый summary для book.yaml (опционально)")
+    p_save.add_argument("--send", action="store_true", help="Отправить урок в Telegram после сохранения")
 
     # status
     sub.add_parser("status", help="Краткий статус")

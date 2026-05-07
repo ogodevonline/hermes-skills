@@ -11,6 +11,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
 from obsidian_utils import write_note, commit_all, get_vault_path
 
+LIFE_SPHERES = [
+    ("🧑‍💻", "Карьера", "30bit, деньги, проекты"),
+    ("❤️", "Лима", "отношения с ней"),
+    ("👨‍👩‍👧", "Семья/Родные", "родители, близкие"),
+    ("🧠", "Развитие", "английский, Python, навыки"),
+    ("💪", "Здоровье/Спорт", "зал, сон, еда"),
+    ("🏠", "Быт/Финансы", "бюджет, порядок, дом"),
+    ("🤝", "Друзья/Люди", "общение вне семьи"),
+    ("🎮", "Хобби/Отдых", "пинг-понг, время для себя"),
+]
+
+def build_spheres_block():
+    """Блок оценки сфер жизни."""
+    lines = ["", "🌱 Баланс жизни:"]
+    for emoji, name, desc in LIFE_SPHERES:
+        lines.append(f"  {emoji} {name}: _ — ({desc})")
+    lines.append("")
+    return "\n".join(lines)
+
+
 DIARY_DIR = get_vault_path() / "Дневник"
 
 
@@ -63,6 +83,7 @@ def build_brief_msg():
         lines.append("")
         lines.append("🔄 Периодические напоминания:")
         lines.append(periodic)
+    lines.append(build_spheres_block())
     lines.extend([
         "",
         "---",
@@ -90,6 +111,7 @@ def save_diary_template():
         lines.append("")
         lines.append("## 🔄 Периодические напоминания")
         lines.append(periodic)
+    lines.append(build_spheres_block())
     lines.extend([
         "",
         "## 💭 Рефлексия",
@@ -149,6 +171,7 @@ def interactive_mode():
     print(f"\n🔁 Привычки:\n{habits}")
     if periodic and "Нет" not in periodic:
         print(f"\n🔄 Периодические напоминания:\n{periodic}")
+    print(build_spheres_block())
     print(f"\n{'='*60}")
     print("📋 Отмечаем задачи (✅ / ❌ / оставь пустым = пропустить):")
     
@@ -204,6 +227,7 @@ def interactive_mode():
         lines.append("")
         lines.append("## 🔄 Периодические напоминания")
         lines.append(periodic2)
+    lines.append(build_spheres_block())
     lines.extend([
         "",
         "## 💭 Рефлексия",

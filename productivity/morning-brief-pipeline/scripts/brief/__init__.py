@@ -111,7 +111,7 @@ from .infra import get_infra_status
 from .tasks import get_one_big_thing
 from .gmail import get_gmail_inbox
 from .calendar import get_calendar
-from .habits import get_workspace_tasks, get_personal_and_habits, get_habits
+from .habits import get_workspace_tasks, get_personal_and_habits, get_habits, get_backlog
 
 
 def split_to_chunks(text: str, max_len: int) -> list[str]:
@@ -141,7 +141,7 @@ def split_to_chunks(text: str, max_len: int) -> list[str]:
     return result
 
 
-def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits):
+def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog):
     """Форматировать бриф как список чанков (отдельные сообщения)"""
     now_msk = datetime.now(MSK)
     day_full = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
@@ -175,9 +175,18 @@ def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, works
     if wp_clean.strip():
         chunks.extend(split_to_chunks(wp_clean, MAX_LEN))
 
+    # Блок 5: Бэклог
+    bl_clean = simplify_links(backlog)
+    if bl_clean.strip():
+        chunks.extend(split_to_chunks(bl_clean, MAX_LEN))
+
     # Футер
     footer = f"\n_🕐 Сгенерировано: {time_str}_"
     chunks.append(footer)
+
+    # Команда на утренний ритуал
+    ritual_msg = "\n📿 **Утренний ритуал?** — напиши `/morning`"
+    chunks.append(ritual_msg)
 
     return chunks
 
@@ -205,8 +214,11 @@ def generate_brief():
     # Личное и привычки
     personal_habits = get_personal_and_habits()
 
+    # Бэклог
+    backlog = get_backlog()
+
     # Форматировать как чанки
-    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits)
+    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog)
 
     # Собрать полный бриф для сохранения в файл
     full_brief = "\n\n".join(chunks)

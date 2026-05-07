@@ -42,6 +42,20 @@ def get_workspace_tasks() -> str:
     return "\n".join(result)
 
 
+def get_backlog() -> str:
+    """Бэклог — отложенные/будущие задачи."""
+    raw = _run_t("list", "--backlog")
+    if not raw or "Нет" in raw:
+        return ""
+    lines = [l.strip() for l in raw.split("\n") if l.strip()]
+    if not lines:
+        return ""
+    result = ["📦 **Бэклог:**"]
+    for line in lines:
+        result.append(f"  {line}")
+    return "\n".join(result)
+
+
 def get_periodic() -> str:
     """Периодические задачи (напоминания)."""
     raw = _run_t("periodic")

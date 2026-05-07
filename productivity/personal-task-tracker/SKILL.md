@@ -22,7 +22,7 @@ CREATE TABLE tasks (
     due_date TEXT,   -- YYYY-MM-DD or YYYY-MM-DD HH:MM
     created_at TEXT DEFAULT (datetime('now','localtime')),
     done_at TEXT,
-    carry_over INTEGER DEFAULT 0  -- сколько раз переносилась (макс 3 → backlog)
+    carry_over INTEGER DEFAULT 0  -- сколько раз переносилась
 );
 
 CREATE TABLE habits (
@@ -78,7 +78,21 @@ t periodic-rm <id>
 t postpone 8          # → завтра (перенос #1)
 t postpone 8 -d 2026-05-01  # → на 1 мая
 ```
-Увеличивает `carry_over` на 1. При >=3 — предупреждение, после `migrate` уйдёт в backlog.
+Увеличивает `carry_over` на 1. При >=3 — предупреждение.
+
+### ⚠️ БАГ: `t migrate` переносил на завтра вместо сегодня (ИСПРАВЛЕНО 06.05.2026)
+
+В `cmd_migrate()` в `~/.local/bin/t` использовался `tomorrow_msk()` вместо `today()`:
+```python
+# ❌ БЫЛО — задачи пропускали день
+(   tomorrow_msk(), carries, r["id"])
+
+# ✅ СТАЛО — задачи переносятся на сегодня
+(   today(), carries, r["id"])
+```
+**Симптом:** migrate в 00:01 МСК переносил просрочку на `tomorrow()` (следующий день), а не на текущую дату. Пользователь терял день — задачи не показывались в `t list` сегодня.
+
+**Фикс:** заменить `tomorrow_msk()` на `today()` в UPDATE-запросе `cmd_migrate()`.
 
 ### t habit-add --days (добавлена)
 
@@ -95,7 +109,9 @@ t habit-add "Работа" --days "Mon,Tue,Wed,Thu,Fri"
 ## Особенности
 
 - **Нет sqlite3 CLI** — только через `t` или Python `import sqlite3`
-- **Лимит переносов** — 3 переноса, потом задача в backlog
+- **Без лимита переносов** — `t migrate` переносит все просрочки на сегодня (не завтра!), никогда не отправляет в backlog
+- **MSK timezone** — `today()` использует Europe/Moscow через `zoneinfo`, не UTC
+- **Бэклог в утреннем брифе** — задачи со статусом `backlog` выводятся отдельной секцией 📦
 - **Привычки по расписанию** — колонка `days` (Mon,Tue,Wed,Thu,Fri,Sat,Sun или *)
 - **Вывод с ID** — `[ 1]`, `[ 9]` — все команды показывают числовые ID для быстрых действий
 
@@ -108,15 +124,52 @@ t habit-add "Работа" --days "Mon,Tue,Wed,Thu,Fri"
 ## Cron
 
 Скрипт `task_migrate.py` вызывает `t migrate` в 00:01 МСК.
-Лимит переносов: 3 раза, после задача уходит в backlog.
+Без лимита переносов — все просрочки переезжают на сегодня.
 
 ## Pitfalls
 
-1. **systemd PATH** — systemd-сервисы не видят `~/.local/bin`. Решение: полный путь `~/.local/bin/t` или `shutil.which("t")`.
+1. **⚡ `-d tomorrow` пишет строку \"tomorrow\" в БД (БАГ, ИСПРАВЛЕНО 08.05.2026)**
+   `cmd_add`, `cmd_list`, `cmd_postpone` не парсили "tomorrow"/"today"/"завтра"/"сегодня" в ISO-дату.
+   **Фикс:** добавлена функция `parse_date(s)` в ~/.local/bin/t, вызывается во всех трёх местах.
+
+2. **systemd PATH** — systemd-сервисы не видят `~/.local/bin`. Решение: полный путь `~/.local/bin/t` или `shutil.which("t")`.
+
+8. **⚠️ cmd_migrate переносил на завтра вместо сегодня (БАГ, ИСПРАВЛЕНО 06.05.2026)**
+   В `cmd_migrate()` в `~/.local/bin/t` (строка ~183) использовался `tomorrow_msk()` вместо `today()`:
+   ```python
+   # ❌ БЫЛО — задачи пропускали день
+   conn.execute("UPDATE tasks SET due_date=?, carry_over=? WHERE id=?",
+                (tomorrow_msk(), carries, r["id"]))
+   
+   # ✅ СТАЛО — задачи переносятся на сегодня
+   conn.execute("UPDATE tasks SET due_date=?, carry_over=? WHERE id=?",
+                (today(), carries, r["id"]))
+   ```
+   **Симптом:** migrate в 00:01 МСК переносил просрочку на ЗАВТРА (следующий день), а не на СЕГОДНЯ. Пользователь терял день — задачи висели "в никуда" и не показывались в `t list` текущего дня.
+   **Фикс:** заменить `tomorrow_msk()` на `today()` в `cmd_migrate()`.
 2. **python3.12 vs venv** — демон task-manager использует `/usr/bin/python3` (3.12), не venv-ный python3.11.
 3. **Привычки с днями** — при добавлении колонки `days` через ALTER TABLE, существующие привычки получают `days='*'` (ежедневно). Надо вручную обновить: `UPDATE habits SET days='Sat,Sun' WHERE id=N`.
-4. **patch tool** — при редактировании `t` (многострочный Python) patch иногда ломает кавычки (`\"` → `\\\"`). Проверять после каждого patch.
+4. **patch tool** — при редактировании `t` (многострочный Python) patch иногда ломает кавычки (`\\\"` → `\\\\\\\"`). Проверять после каждого patch.
 5. **Привычки без UNIQUE** — `habit_log` не имеет `UNIQUE(habit_id, date)`, поэтому `t habit-done <id>` можно вызывать **много раз в день**. Каждый вызов создаёт новую запись. В выводе `t habits` показывается количество подходов: ✅x3.
+6. **`t postpone` не меняет время задачи** — команда `t postpone <id> [-d DATE]` меняет только `due_date`, но **не время**. Время хранится в поле `name` как префикс (например, `"17:00 💪 Тренажёрный зал"`). Чтобы изменить время, нужно править `name` напрямую через SQLite:
+
+   ```python
+   import sqlite3
+   conn = sqlite3.connect('/home/hermes/.hermes/tasks/tasks.db')
+   # Для задачи с временем в имени — заменить префикс
+   conn.execute("UPDATE tasks SET name = REPLACE(name, '17:00', '07:00') WHERE id = 60")
+   # Для задачи без времени — переписать имя целиком
+   conn.execute("UPDATE tasks SET name = '09:00 🧺 Постирать вещи' WHERE id = 25")
+   conn.commit()
+   conn.close()
+   ```
+
+   **Альтернатива** — пересоздать задачу: `t cancel <id>` + `t add "07:00 💪 Зал" -d YYYY-MM-DD`, но это теряет историю переносов (carry_over). SQLite-редактирование предпочтительнее.
+7. **Проверка структуры БД** — перед SQLite-правкой всегда проверять схему:
+   ```python
+   conn.execute('PRAGMA table_info(tasks)').fetchall()
+   ```
+   Поле `due_date` хранит ТОЛЬКО дату (YYYY-MM-DD), время — только в `name`.
 
 ## Связь привычек и периодических задач
 
