@@ -1,6 +1,8 @@
 ---
 name: obsidian
+category: note-taking
 description: Git-synced Obsidian vault — Hermes writes notes and auto-pushes, user reads on phone via git pull.
+requires: []
 ---
 
 # Obsidian Git-Synced Vault
@@ -68,7 +70,16 @@ VAULT="${OBSIDIAN_VAULT_PATH}"
 ### List: `find "$VAULT" -name "*.md" -type f`
 ### Search by content: `grep -rli "keyword" "$VAULT" --include="*.md"`
 ### Create: `cat > "$VAULT/Note.md" << 'ENDNOTE' ... ENDNOTE`
-### Append: `echo -e "\n## Section\n\nContent." >> "$VAULT/Note.md"`
+### Append: `echo -e "\\n## Section\\n\\nContent." >> "$VAULT/Note.md"`
+
+### Write/update a section (recommended for multi-section files)
+Для файлов с несколькими sekциями (утренний ритуал + вечерний дневник) используй `write_section()` из `~/.hermes/skills/brief/obsidian_utils.py`:
+```python
+from obsidian_utils import write_section, commit_all
+write_section("Дневник/YYYY-MM-DD.md", "# 📖 Вечерний дневник", content)
+commit_all("diary YYYY-MM-DD")
+```
+`write_section()` находит секцию по заголовку и заменяет только её, не трогая остальное. Если секции нет — дописывает в конец. Это безопаснее, чем `write_note()` (перезапись всего файла).
 
 Use `[[Title]]` wikilinks to connect notes.
 

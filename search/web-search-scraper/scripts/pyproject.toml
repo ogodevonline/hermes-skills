@@ -1,0 +1,13 @@
+[project]
+name = "web-search-scraper"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx",
+    "trafilatura",
+    "python-dotenv",
+    "crawl4ai>=0.8.6",
+]
+
+[project.scripts]
+web-search = "search:main"

@@ -42,17 +42,24 @@ def init_db():
             done_at TEXT,
             FOREIGN KEY (habit_id) REFERENCES habits(id)
         );
+        CREATE TABLE IF NOT EXISTS birthdays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            date TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
     """)
     conn.commit()
     conn.close()
 
 def add_days_column():
-    """Добавить колонку days в habits (если нет)."""
+    """Миграции: days, project, goal_id, tags."""
     conn = get_db()
-    try:
-        conn.execute("ALTER TABLE habits ADD COLUMN days TEXT DEFAULT '*'")
-    except Exception:
-        pass
+    for col, dtype in [("days", "TEXT DEFAULT '*'"), ("project", "TEXT DEFAULT ''"), ("goal_id", "TEXT DEFAULT ''"), ("tags", "TEXT DEFAULT ''")]:
+        try:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {dtype}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -88,8 +95,8 @@ def cmd_add(args):
     conn = get_db()
     date = parse_date(args.due) or today()
     conn.execute(
-        "INSERT INTO tasks (name, priority, category, due_date, reminder, duration) VALUES (?,?,?,?,?,?)",
-        (args.name, args.priority.upper(), args.category, date, args.reminder, args.duration)
+        "INSERT INTO tasks (name, priority, category, due_date, reminder, duration, project, goal_id, tags) VALUES (?,?,?,?,?,?,?,?,?)",
+        (args.name, args.priority.upper(), args.category, date, args.reminder, args.duration, args.project or "", args.goal or "", args.tags or "")
     )
     conn.commit()
     tid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -104,9 +111,14 @@ def cmd_add(args):
 def cmd_done(args):
     conn = get_db()
     now = datetime.datetime.now(MSK).strftime("%H:%M")
+    if args.date:
+        date = parse_date(args.date) or today()
+        done_at_val = f"{date} {now}"
+    else:
+        done_at_val = now
     cur = conn.execute(
         "UPDATE tasks SET status='done', done_at=? WHERE id=? AND status='pending'",
-        (now, args.id)
+        (done_at_val, args.id)
     )
     if cur.rowcount:
         t = conn.execute("SELECT name FROM tasks WHERE id=?", (args.id,)).fetchone()
@@ -132,32 +144,47 @@ def cmd_cancel(args):
 
 def cmd_list(args):
     conn = get_db()
+    
+    # Базовый запрос
+    where = []
+    params = []
+    
     if args.backlog:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE status='backlog' ORDER BY priority, id"
-        ).fetchall()
+        where.append("status='backlog'")
     elif args.date:
         lookup_date = parse_date(args.date) or args.date
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE due_date=? ORDER BY CASE priority WHEN 'H' THEN 0 WHEN 'M' THEN 1 ELSE 2 END, id",
-            (lookup_date,)
-        ).fetchall()
+        where.append("due_date=?")
+        params.append(lookup_date)
     elif args.all:
-        rows = conn.execute(
-            "SELECT * FROM tasks ORDER BY due_date DESC, priority, id"
-        ).fetchall()
+        pass  # все задачи
     else:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE due_date=? AND status!='cancelled' ORDER BY CASE priority WHEN 'H' THEN 0 WHEN 'M' THEN 1 ELSE 2 END, id",
-            (today(),)
-        ).fetchall()
-
+        where.append("due_date=? AND status!='cancelled'")
+        params.append(today())
+    
+    # Фильтры
+    if args.project:
+        where.append("project=?")
+        params.append(args.project)
+    if args.goal:
+        where.append("goal_id=?")
+        params.append(args.goal)
+    if args.tags:
+        where.append("tags LIKE ?")
+        params.append(f"%{args.tags}%")
+    
+    sql = "SELECT * FROM tasks"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY CASE priority WHEN 'H' THEN 0 WHEN 'M' THEN 1 ELSE 2 END, id"
+    
+    rows = conn.execute(sql, params).fetchall()
+    
     if not rows:
         print("📭 Нет задач")
         return
-
+    
     for r in rows:
-        prio_icon = {"H": "🔴", "M": "🟡", "L": "🟢"}.get(r["priority"], "⚪")
+        prio_icon = {"H": "[H]", "M": "[M]", "L": "[L]"}.get(r["priority"], "[?]")
         status_icon = {"done": "✅", "pending": "⏳", "cancelled": "❌", "backlog": "📦"}.get(r["status"], "⏳")
         suffix = ""
         if r["reminder"]:
@@ -165,8 +192,20 @@ def cmd_list(args):
         if r["duration"]:
             suffix += f" ⏱{r['duration']}"
         print(f"  {status_icon} {prio_icon} [{r['id']:2d}] {r['name']}{suffix}")
-        if args.all or args.date:
-            print(f"         📅 {r['due_date']}  🏷️ {r['category']}")
+        # Доп. мета
+        meta = []
+        if r["due_date"]:
+            meta.append(f"📅 {r['due_date']}")
+        if r["category"] and r["category"] != "general":
+            meta.append(f"🏷️ {r['category']}")
+        if r["project"]:
+            meta.append(f"📁 {r['project']}")
+        if r["goal_id"]:
+            meta.append(f"🎯 {r['goal_id']}")
+        if r["tags"]:
+            meta.append(f"# {r['tags']}")
+        if meta:
+            print(f"         {'  '.join(meta)}")
     conn.close()
 
 def cmd_postpone(args):
@@ -242,15 +281,16 @@ def cmd_habits(args):
 def cmd_habit_done(args):
     conn = get_db()
     now = datetime.datetime.now(MSK).strftime("%H:%M")
+    date = parse_date(args.date) or today()
     conn.execute(
         "INSERT INTO habit_log (habit_id, date, done, done_at) VALUES (?,?,1,?)",
-        (args.id, today(), now)
+        (args.id, date, now)
     )
     h = conn.execute("SELECT name FROM habits WHERE id=?", (args.id,)).fetchone()
     if h:
         cnt = conn.execute(
             "SELECT COUNT(*) FROM habit_log WHERE habit_id=? AND date=? AND done=1",
-            (args.id, today())
+            (args.id, date)
         ).fetchone()[0]
         label = f"✅ (x{cnt})" if cnt > 1 else "✅"
         print(f"✅ {h['name']} — {label}")
@@ -318,6 +358,71 @@ def cmd_periodic_rm(args):
     conn.execute("DELETE FROM periodic WHERE id=?", (args.id,))
     conn.commit()
     print(f"🗑️ Периодическое удалено: {p['name']}")
+    conn.close()
+
+# ─── Дни рождения ────────────────────────────
+
+def cmd_bd_add(args):
+    conn = get_db()
+    try:
+        datetime.datetime.strptime(args.date, "%m-%d")
+    except ValueError:
+        print("❌ Формат даты: ММ-ДД (например 05-08)")
+        return
+    conn.execute("INSERT INTO birthdays (name, date) VALUES (?,?)", (args.name, args.date))
+    conn.commit()
+    bid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    print(f"🎂 ДР добавлен: {args.name} ({args.date})  (id={bid})")
+    conn.close()
+
+def cmd_bd_list(args):
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM birthdays ORDER BY date, name").fetchall()
+    if not rows:
+        print("📭 Нет дней рождений")
+        return
+    print(f"🎂 {len(rows)} именинников:")
+    for r in rows:
+        print(f"  [{r['id']:2d}] {r['name']} — {r['date']}")
+    conn.close()
+
+def cmd_bd_upcoming(args):
+    """Показать ближайшие ДР (в пределах N дней)."""
+    conn = get_db()
+    today_md = datetime.datetime.now(MSK).strftime("%m-%d")
+    rows = conn.execute("SELECT * FROM birthdays ORDER BY date").fetchall()
+    if not rows:
+        print("📭 Нет дней рождений")
+        return
+    upcoming = []
+    for r in rows:
+        # считаем дни до ДР
+        month, day = map(int, r["date"].split("-"))
+        this_year = datetime.date.today().year
+        bd_date = datetime.date(this_year, month, day)
+        if bd_date < datetime.date.today():
+            bd_date = datetime.date(this_year + 1, month, day)
+        days_left = (bd_date - datetime.date.today()).days
+        if days_left <= (args.days or 30):
+            upcoming.append((days_left, r["name"], r["date"]))
+    upcoming.sort(key=lambda x: x[0])
+    if not upcoming:
+        print(f"📭 Нет ближайших ДР в ближайшие {args.days or 30} дней")
+        return
+    print(f"🎂 Ближайшие ДР (в пределах {args.days or 30} дней):")
+    for d, name, date in upcoming:
+        print(f"  {name} — {date}  ({'сегодня!' if d == 0 else f'через {d} дн.'})")
+    conn.close()
+
+def cmd_bd_rm(args):
+    conn = get_db()
+    r = conn.execute("SELECT name FROM birthdays WHERE id=?", (args.id,)).fetchone()
+    if not r:
+        print("⚠️ Не найдено")
+        return
+    conn.execute("DELETE FROM birthdays WHERE id=?", (args.id,))
+    conn.commit()
+    print(f"🗑️ ДР удалён: {r['name']}")
     conn.close()
 
 # ─── Статус (коротко для Hermes) ──────────
@@ -415,14 +520,23 @@ def main():
     p.add_argument("-d", "--due", help="Дата (ГГГГ-ММ-ДД), по умолчанию сегодня")
     p.add_argument("-r", "--reminder", help="Время напоминания (ЧЧ:ММ)")
     p.add_argument("--duration", help="Длительность (напр. 1.5ч)")
+    p.add_argument("--project", help="Проект (30bit, english, health...)")
+    p.add_argument("--goal", help="ID цели из goals.yaml (career_senior, english_c1...)")
+    p.add_argument("--tags", help="Теги через запятую (leetcode,arch,test)")
 
-    sub.add_parser("done", help="Отметить выполненной").add_argument("id", type=int)
-    sub.add_parser("cancel", help="Отменить задачу").add_argument("id", type=int)
+    p = sub.add_parser("done", help="Отметить выполненной")
+    p.add_argument("id", type=int)
+    p.add_argument("-d", "--date", help="Дата в формате YYYY-MM-DD (по умолч. сегодня)")
+    
+    p = sub.add_parser("cancel", help="Отменить задачу").add_argument("id", type=int)
 
     p = sub.add_parser("list", help="Список задач")
     p.add_argument("--all", action="store_true")
     p.add_argument("--date")
     p.add_argument("--backlog", action="store_true")
+    p.add_argument("--project", help="Фильтр по проекту")
+    p.add_argument("--goal", help="Фильтр по ID цели")
+    p.add_argument("--tags", help="Фильтр по тегам")
 
     p = sub.add_parser("postpone", help="Перенести задачу на другой день")
     p.add_argument("id", type=int)
@@ -438,7 +552,9 @@ def main():
     p.add_argument("name")
     p.add_argument("--time")
     p.add_argument("--days", help="Дни недели через запятую (Mon,Tue,Wed...). '*' = ежедневно")
-    sub.add_parser("habit-done", help="Отметить привычку").add_argument("id", type=int)
+    p = sub.add_parser("habit-done", help="Отметить привычку")
+    p.add_argument("id", type=int)
+    p.add_argument("-d", "--date", help="Дата в формате YYYY-MM-DD (по умолч. сегодня)")
     sub.add_parser("habit-rm", help="Удалить привычку").add_argument("id", type=int)
 
     # periodic
@@ -449,6 +565,17 @@ def main():
     p.add_argument("--start", help="Время начала (ЧЧ:ММ), по умолч. 08:00")
     p.add_argument("--end", help="Время окончания (ЧЧ:ММ), по умолч. 22:00")
     sub.add_parser("periodic-rm", help="Удалить периодическую задачу").add_argument("id", type=int)
+
+    # birthdays
+    p = sub.add_parser("bd", help="Управление днями рождения")
+    bd_sub = p.add_subparsers(dest="bd_cmd")
+    bd_add = bd_sub.add_parser("add", help="Добавить ДР")
+    bd_add.add_argument("name")
+    bd_add.add_argument("date", help="ММ-ДД")
+    bd_sub.add_parser("list", help="Список всех ДР")
+    bd_upcoming = bd_sub.add_parser("upcoming", help="Ближайшие ДР")
+    bd_upcoming.add_argument("-d", "--days", type=int, default=30, help="Количество дней (по умолч. 30)")
+    bd_sub.add_parser("rm", help="Удалить ДР").add_argument("id", type=int)
 
     args = parser.parse_args()
     if not args.command:
@@ -464,7 +591,14 @@ def main():
         "periodic": cmd_periodic, "periodic-add": cmd_periodic_add,
         "periodic-rm": cmd_periodic_rm,
     }
-    cmds[args.command](args)
+    if args.command == "bd":
+        if not args.bd_cmd:
+            print("Использование: t bd {add|list|upcoming|rm} ...")
+            return
+        bd_cmds = {"add": cmd_bd_add, "list": cmd_bd_list, "upcoming": cmd_bd_upcoming, "rm": cmd_bd_rm}
+        bd_cmds[args.bd_cmd](args)
+    else:
+        cmds[args.command](args)
 
 if __name__ == "__main__":
     main()

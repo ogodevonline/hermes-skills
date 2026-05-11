@@ -9,7 +9,7 @@ import sys, os, datetime, subprocess, json
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
-from obsidian_utils import write_note, commit_all, get_vault_path
+from obsidian_utils import write_note, write_section, commit_all, get_vault_path
 
 LIFE_SPHERES = [
     ("🧑‍💻", "Карьера", "30bit, деньги, проекты"),
@@ -89,6 +89,19 @@ def build_brief_msg():
         "---",
         "Напиши «подведи итоги» — пройдёмся по каждой задаче.",
     ])
+
+    # ── Цели на сегодня ──
+    try:
+        goals_checkin = subprocess.run(
+            ["python3", str(Path.home() / ".hermes" / "skills" / "productivity" / "life-planning" / "scripts" / "planning.py"), "--goals-checkin"],
+            capture_output=True, text=True, timeout=10
+        )
+        if goals_checkin.stdout.strip():
+            lines.append("")
+            lines.append(goals_checkin.stdout.strip())
+    except Exception:
+        pass
+
     return "\n".join(lines)
 
 def save_diary_template():
@@ -135,7 +148,7 @@ def save_diary_template():
     ])
     content = "\n".join(lines)
     fpath = DIARY_DIR / f"{today}.md"
-    write_note(f"Дневник/{today}.md", content)
+    write_section(f"Дневник/{today}.md", "# 📖 Вечерний дневник", content)
     commit_all(f"diary {today}: template")
     return fpath
 
@@ -243,7 +256,7 @@ def interactive_mode():
     print(f"{'='*60}")
     
     fpath = DIARY_DIR / f"{today}.md"
-    write_note(f"Дневник/{today}.md", diary)
+    write_section(f"Дневник/{today}.md", "# 📖 Вечерний дневник", diary)
     commit_all(f"diary {today}")
     print(f"\n💾 Сохранено: {fpath}")
 

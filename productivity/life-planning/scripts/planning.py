@@ -1,200 +1,206 @@
 #!/usr/bin/env python3
-"""Персональный планировщик — стратегия, тактика, оперативка.
+"""Сборщик данных для Life Planning.
 
-Запуск:
-  python3 planning.py                           # план на неделю
-  python3 planning.py --period month            # план на месяц
-  python3 planning.py --period quarter          # план на квартал
-  python3 planning.py --now "2026-06-01"        # от指定 даты
+Читает:
+  1. Obsidian дневники за период (задачи ✅, привычки ✅, 8 сфер, рефлексия)
+  2. MEMORY.md — все факты
+  3. USER.md — профиль
+  4. Планы из Планирование/ — 4 предыдущих + текущий
+
+Не вызывает t list / t habits — дневники содержат всё.
+Выдаёт JSON.
 """
 
-import json, subprocess, sys, datetime
+import json, sys, datetime, re
 from pathlib import Path
-from dataclasses import dataclass
 
-WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+HOME = Path.home()
+DIARY = HOME / "hermes-vault" / "Дневник"
+PLANS = HOME / "hermes-vault" / "Планирование"
+PROJECTS = HOME / "hermes-vault" / "Проекты"
+MEMORY_FILE = HOME / ".hermes" / "memories" / "MEMORY.md"
+USER_FILE = HOME / ".hermes" / "memories" / "USER.md"
+WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+SPHERE_EMOJIS = r'[💼❤️👨‍👩‍👧📚💪🏠🤝🎮🎯]'
 
-@dataclass
-class Task:
-    id: int
-    name: str
-    priority: str
-    status: str  # ⏳ ✅ ❌
 
-def run_t(*args):
-    r = subprocess.run(["t", *args], capture_output=True, text=True, timeout=10)
-    return r.stdout.strip()
+def parse_diary(path):
+    """Парсит дневник: задачи ✅, привычки ✅, 8 сфер, рефлексия."""
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    result = {
+        "date": path.stem,
+        "done_tasks": [],
+        "done_habits": [],
+        "spheres": {},
+        "reflections": {}
+    }
 
-def parse_tasks(output):
-    """Парсит t list — возвращает список Task."""
-    import re
-    tasks = []
-    for line in output.splitlines():
-        line = line.strip()
-        if not line or line.startswith("📭") or "───" in line or line.startswith("ID"):
+    in_section = None  # tasks / habits / spheres / none
+
+    for line in lines:
+        # Определение секции
+        if re.match(r'^#{1,3}\s', line):
+            if "Задач" in line:
+                in_section = "tasks"
+            elif "Привыч" in line:
+                in_section = "habits"
+            elif "Восемь сфер" in line or "8 сфер" in line:
+                in_section = "spheres"
+            elif "Рефлекс" in line:
+                in_section = "reflections"
+            else:
+                in_section = None
             continue
-        # ⏳ 🟡 [23] 22:00 🍲 Название
-        # ⏳ 🟡 [23] Название
-        m = re.match(r'[✅⏳❌]\s+[🔴🟡🟢]\s+\[(\d+)\]\s*(?:\d+:\d+\s+)?(.*)', line)
-        if m:
-            tasks.append(Task(id=int(m.group(1)), name=m.group(2).strip(), priority="M", status="⏳"))
-    return tasks
 
-def parse_habits(output):
-    """Парсит t habits — возвращает список привычек."""
-    habits = []
-    for line in output.splitlines():
-        line = line.strip()
-        if not line or "───" in line:
-            continue
-        # ⏳ [ 1] Omega + D3 08:00
-        import re
-        m = re.match(r'[✅⏳]\s+\[\s*(\d+)\]\s*(.*)', line)
+        # Задачи ✅
+        if in_section == "tasks" and line.strip().startswith("✅"):
+            result["done_tasks"].append(line.strip())
+
+        # Привычки ✅
+        if in_section == "habits" and line.strip().startswith("✅"):
+            result["done_habits"].append(line.strip())
+
+        # Сферы: | 💼 Карьера | 7 | текст | или | 💼 Карьера | текст |
+        if in_section == "spheres":
+            m = re.search(r'\|\s*' + SPHERE_EMOJIS + r'\s*(.+?)\s*\|\s*(\d+)\s*\|', line)
+            if m:
+                result["spheres"][m.group(1).strip()] = {"score": int(m.group(2))}
+                continue
+            m = re.search(r'\|\s*' + SPHERE_EMOJIS + r'\s*(.+?)\s*\|\s*(.+?)\s*\|', line)
+            if m:
+                result["spheres"][m.group(1).strip()] = {"comment": m.group(2).strip()}
+
+    # Рефлексия (5 вопросов) — ищем **1. ...?** текст
+    for q in range(1, 6):
+        m = re.search(
+            r'\*\*' + str(q) + r'\.\s*(.+?)\?\*\*\s*\n(.+?)(?:\n\n|\Z)',
+            text, re.DOTALL
+        )
         if m:
-            habits.append({"id": int(m.group(1)), "name": m.group(2).strip()})
-    return habits
+            result["reflections"][f"q{q}"] = m.group(2).strip()
+
+    return result
+
+
+def get_diaries(period="week", now=None):
+    """Собирает дневники за период (от now назад)."""
+    if now is None:
+        now = datetime.date.today()
+    if not DIARY.exists():
+        return []
+    days = {"week": 7, "month": 30, "quarter": 90, "year": 365, "5y": 1825, "10y": 3650}.get(period, 7)
+    entries = []
+    for i in range(days):
+        d = now - datetime.timedelta(days=i)
+        f = DIARY / f"{d.isoformat()}.md"
+        if f.exists():
+            parsed = parse_diary(f)
+            if parsed:
+                entries.append(parsed)
+    return entries
+
+
+def get_plans(period="week", now=None, count=5):
+    """Читает ВСЕ файлы планов из Планирование/ + проекты из Проекты/."""
+    result = {}
+
+    # Читаем всё из Планирование/
+    if PLANS.exists():
+        for f in sorted(PLANS.glob("*.md"), reverse=True):
+            result[f.stem] = f.read_text(encoding="utf-8", errors="replace")
+
+    # Добавляем проекты из Проекты/
+    if PROJECTS.exists():
+        for f in sorted(PROJECTS.rglob("*.md")):
+            rel = str(f.relative_to(PROJECTS))
+            if rel == "README.md":
+                continue
+            result[rel] = f.read_text(encoding="utf-8", errors="replace")
+
+    return result
+
+
+def read_text_files():
+    """Читает MEMORY.md и USER.md."""
+    result = {"memory": [], "user_profile": []}
+    if MEMORY_FILE.exists():
+        text = MEMORY_FILE.read_text(encoding="utf-8", errors="replace")
+        result["memory"] = [s.strip() for s in text.split("§") if s.strip()]
+    if USER_FILE.exists():
+        text = USER_FILE.read_text(encoding="utf-8", errors="replace")
+        result["user_profile"] = [s.strip() for s in text.split("§") if s.strip()]
+    return result
+
 
 def generate(period="week", now=None):
     if now is None:
         now = datetime.date.today()
-    else:
+    elif isinstance(now, str):
         now = datetime.date.fromisoformat(now)
 
-    # Параметры периода
-    if period == "week":
-        days = 7
-        title = "НЕДЕЛЯ"
-        focus = "ближайшие 7 дней"
-    elif period == "month":
-        days = 30
-        title = "МЕСЯЦ"
-        focus = "ближайшие 30 дней"
-    elif period == "quarter":
-        days = 90
-        title = "КВАРТАЛ"
-        focus = "ближайшие 3 месяца"
-    else:
-        days = 7
-        title = "НЕДЕЛЯ"
-        focus = "ближайшие 7 дней"
+    diaries = get_diaries(period, now)
+    plans = get_plans(period, now)
+    user = read_text_files()
 
-    # Собираем данные
-    tasks_out = run_t("list")
-    habits_out = run_t("habits")
-    tasks = parse_tasks(tasks_out)
-    habits = parse_habits(habits_out)
+    # Сводка по сферам из дневников
+    sphere_summary = {}
+    for d in diaries:
+        for sphere, data in d["spheres"].items():
+            if sphere not in sphere_summary:
+                sphere_summary[sphere] = {"comments": [], "scores": []}
+            if "comment" in data:
+                sphere_summary[sphere]["comments"].append(data["comment"])
+            if "score" in data:
+                sphere_summary[sphere]["scores"].append(data["score"])
+    for s in sphere_summary:
+        if sphere_summary[s]["scores"]:
+            sc = sphere_summary[s]["scores"]
+            sphere_summary[s]["avg"] = round(sum(sc) / len(sc), 1)
 
-    pending = [t for t in tasks if t.status == "⏳"]
-    done = [t for t in tasks if t.status == "✅"]
+    # Статистика по неделе
+    week_stats = {"days_with_diary": len(diaries), "total_done_tasks": 0, "total_done_habits": 0}
+    for d in diaries:
+        week_stats["total_done_tasks"] += len(d["done_tasks"])
+        week_stats["total_done_habits"] += len(d["done_habits"])
 
-    output = []
-    output.append("=" * 60)
-    output.append(f"📊 ПЛАНИРОВАНИЕ: {title}")
-    output.append(f"Дата: {now.strftime('%d.%m.%Y (%A)')}")
-    output.append(f"Период: {focus}")
-    output.append("=" * 60)
-    output.append("")
+    data = {
+        "meta": {
+            "period": period,
+            "date": now.isoformat(),
+            "day_of_week": WEEKDAYS[now.weekday()]
+        },
+        "week_stats": week_stats,
+        "sphere_summary": sphere_summary,
+        "diaries": [
+            {
+                "date": d["date"],
+                "done_tasks_count": len(d["done_tasks"]),
+                "done_tasks": d["done_tasks"],
+                "done_habits_count": len(d["done_habits"]),
+                "done_habits": d["done_habits"],
+                "spheres": d["spheres"],
+                "reflections": d["reflections"]
+            }
+            for d in diaries
+        ],
+        "plans": plans,
+        "user": user
+    }
 
-    # ----- СТРАТЕГИЯ -----
-    output.append("🎯 СТРАТЕГИЯ")
-    output.append("-" * 40)
-
-    # Считаем статистику
-    total_tasks = len(pending) + len(done)
-    done_today = len(done)
-    progress = f"{done_today}/{total_tasks} задач" if total_tasks > 0 else "нет задач"
-
-    output.append(f"📌 Текущий прогресс: {progress}")
-    output.append(f"🏋️ Привычек в графике: {len(habits)}")
-    output.append("")
-
-    # Приоритеты на период
-    if pending:
-        output.append("🔴 Приоритеты (открытые задачи):")
-        for t in pending[:8]:  # топ-8
-            output.append(f"  • [{t.id}] {t.name}")
-    output.append("")
-
-    output.append("⚡ Фокусы периода:")
-    output.append("  • Deep Work — 2-3 часа утром, без уведомлений")
-    output.append("  • Спорт — 3-4 тренировки в неделю (записать в календарь)")
-    output.append("  • Отношения — зафиксировать вечер с Лимой")
-    output.append("  • Сон — 7-8 часов, неприкосновенно")
-    output.append("")
-
-    # ----- ТАКТИКА (по дням) -----
-    output.append("📅 ТАКТИКА: ПО ДНЯМ")
-    output.append("-" * 40)
-    output.append("")
-
-    for i in range(days):
-        d = now + datetime.timedelta(days=i)
-        day_name = WEEKDAYS_RU[d.weekday()]
-        is_weekend = d.weekday() >= 5
-        marker = "⬜" if is_weekend else "📍"
-        day_type = "Выходной" if is_weekend else "Рабочий"
-        output.append(f"{marker} День {i+1:2d} | {d.strftime('%d.%m')} ({day_name}) | {day_type}")
-
-        if i == 0:
-            output.append(f"     🎯 Главное на сегодня + вечерний дневник")
-        elif i == days - 1:
-            output.append(f"     🎯 Ревью периода + план на следующий")
-        elif i == days // 2:
-            output.append(f"     🔄 Чек-пойнт: середина, корректировка")
-        elif not is_weekend:
-            output.append(f"     Deep Work → задачи → тренировка → Лима")
-        else:
-            output.append(f"     ☕ Отдых, прогулка, пинг-понг, перезагрузка")
-        output.append("")
-
-    # ----- ОПЕРАТИВКА -----
-    output.append("⚡ ОПЕРАТИВКА (ежедневный ритуал)")
-    output.append("-" * 40)
-    output.append("")
-    output.append("🌅 Утро (06:00 — morning brief):")
-    output.append("  • Прочитать бриф, выбрать 1-3 MUST-задачи")
-    output.append("  • Заблокировать Deep Work в календаре")
-    output.append("")
-    output.append("☀️ День:")
-    output.append("  • Deep Work (2-3 часа) — без телефона/уведомлений")
-    output.append("  • Правило 1-3-5: 1 главная, 3 средних, 5 мелких")
-    output.append("  • Если не закрыл — перенести, не ругать себя")
-    output.append("")
-    output.append("🌙 Вечер (21:00 — evening brief):")
-    output.append("  • Выполнить вечерний дневник (5 вопросов)")
-    output.append("  • ✅/⏳/❌ по задачам")
-    output.append("  • Настроить задачи на завтра")
-    output.append("")
-
-    # ----- РИТУАЛЫ -----
-    output.append(f"🔄 РИТУАЛЫ НА {title}:")
-    output.append("-" * 40)
-    output.append("  🔹 Воскресенье 20:00 — ревью недели")
-    output.append("  🔹 Последний день периода — план на следующий")
-    output.append("  🔹 Чек-пойнт в середине периода")
-    output.append("")
-
-    output.append("=" * 60)
-    output.append("💪 Помни:")
-    output.append("  • Баланс дисциплины и здоровья")
-    output.append("  • Не расстраивать Лиму — планировать заранее")
-    output.append("  • Если не успел вечерний бриф — можно за любой день")
-    output.append("=" * 60)
-
-    return "\n".join(output)
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
     period = "week"
     now_arg = None
-    args = sys.argv[1:]
-
-    for i, a in enumerate(args):
-        if a == "--period" and i + 1 < len(args):
-            period = args[i + 1]
-        elif a == "--now" and i + 1 < len(args):
-            now_arg = args[i + 1]
-        elif a in ("week", "month", "quarter"):
+    for i, a in enumerate(sys.argv[1:]):
+        if a == "--period" and i + 1 < len(sys.argv) - 1:
+            period = sys.argv[i + 2]
+        elif a == "--now" and i + 1 < len(sys.argv) - 1:
+            now_arg = sys.argv[i + 2]
+        elif a in ("week", "month", "quarter", "year", "5y", "10y"):
             period = a
-
     print(generate(period, now_arg))

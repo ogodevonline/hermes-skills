@@ -2,7 +2,7 @@
 name: personal-task-tracker
 category: productivity
 description: SQLite-based CLI трекер задач и привычек. Одна БД, простые команды, короткий статус для Hermes.
-setup_needed: true
+requires: []
 ---
 
 # Personal Task Tracker
@@ -33,6 +33,13 @@ CREATE TABLE habits (
     days TEXT DEFAULT '*'  -- дни недели: '*'=ежедневно, 'Sat,Sun'=выходные, 'Mon,Wed,Fri' и т.д.
 );
 
+CREATE TABLE IF NOT EXISTS birthdays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    date TEXT NOT NULL,       -- ММ-ДД
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS habit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     habit_id INTEGER NOT NULL,
@@ -52,7 +59,7 @@ CREATE TABLE IF NOT EXISTS habit_log (
 ```bash
 # Задачи
 t add "Название" [-p M] [-c general] [-d YYYY-MM-DD] [-r HH:MM] [--duration "1.5ч"]
-t done <id>                                             # ✅
+t done <id> [-d YYYY-MM-DD]                             # ✅ (по умолч. сегодня)
 t cancel <id>                                           # ❌
 t postpone <id> [-d YYYY-MM-DD]                         # ➡️ перенести на завтра/указ. дату
 t list [--all|--date YYYY-MM-DD|--backlog]              # список (сегодня по умолч.)
@@ -62,14 +69,31 @@ t status                                                # краткий ста�
 # Привычки
 t habits                              # список на сегодня с количеством подходов (✅xN)
 t habit-add "Название" --time HH:MM [--days "Sat,Sun"]
-t habit-done <id>                     # ✅ множественный трекинг — можно несколько раз в день
+t habit-done <id> [-d YYYY-MM-DD]     # ✅ множественный трекинг — можно несколько раз в день. Флаг -d для произвольной даты (по умолч. сегодня)
 t habit-rm <id>
 
 # Периодические задачи
 t periodic
 t periodic-add "Название" -e "1h" [--start 09:00] [--end 22:00]
 t periodic-rm <id>
+
+# Дни рождения (добавлено 08.05.2026)
+t bd add "Имя" ММ-ДД                  # 🎂 добавить ДР (пример: t bd add "Лёха" 05-08)
+t bd list                              # список всех ДР
+t bd upcoming [-d N]                  # ближайшие ДР (по умолч. 30 дней)
+t bd rm <id>                           # удалить ДР
 ```
+
+### t done / t habit-done с `-d` (добавлено 10.05.2026)
+
+Отметить задачу/привычку за произвольную дату:
+```
+t done 7 -d 2026-05-09        # задача выполнена 9 мая
+t habit-done 1 -d 2026-05-09  # привычка сделана 9 мая
+```
+При `t done -d` в `done_at` сохраняется `"YYYY-MM-DD HH:MM"` (вместо просто `HH:MM`).
+При `t habit-done -d` запись идёт в `habit_log` с указанной датой.
+Без флага `-d` — поведение как раньше (сегодняшняя дата).
 
 ### t postpone (добавлена)
 
@@ -114,6 +138,7 @@ t habit-add "Работа" --days "Mon,Tue,Wed,Thu,Fri"
 - **Бэклог в утреннем брифе** — задачи со статусом `backlog` выводятся отдельной секцией 📦
 - **Привычки по расписанию** — колонка `days` (Mon,Tue,Wed,Thu,Fri,Sat,Sun или *)
 - **Вывод с ID** — `[ 1]`, `[ 9]` — все команды показывают числовые ID для быстрых действий
+- **🎂 Дни рождения** — таблица `birthdays` в той же БД. Автоматическая проверка утром через `t bd upcoming -d 0`
 
 ## Интеграция с Hermes
 
@@ -126,9 +151,35 @@ t habit-add "Работа" --days "Mon,Tue,Wed,Thu,Fri"
 Скрипт `task_migrate.py` вызывает `t migrate` в 00:01 МСК.
 Без лимита переносов — все просрочки переезжают на сегодня.
 
+## Planned features
+
+### 🎂 Birthday tracker (запрошено 08.05.2026)
+Пользователь хочет трекать ДР знакомых в той же БД:
+```sql
+CREATE TABLE birthdays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    day INTEGER NOT NULL,    -- день (1-31)
+    month INTEGER NOT NULL,  -- месяц (1-12)
+    year INTEGER,            -- опционально: год рождения
+    note TEXT,               --  "друг", "коллега" и т.п.
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+```
+Планируемый CLI:
+```
+t bd add "Лёха" 08-05          # добавить
+t bd list                       # все
+t bd upcoming                   # ближайшие 30 дней
+t bd rm <id>
+```
+Реализовано 08.05.2026.
+
 ## Pitfalls
 
-1. **⚡ `-d tomorrow` пишет строку \"tomorrow\" в БД (БАГ, ИСПРАВЛЕНО 08.05.2026)**
+1. **⚡ Не включать `[H]`/`[M]`/`[L]` в имя задачи при `-p`** — флаг `-p H` уже добавляет префикс. Если написать `t add "[H] Задача" -p H`, в БД попадёт `[H] [H] Задача`. Имена задач указывать без приоритетного префикса.
+
+2. **⚡ `-d tomorrow` пишет строку \"tomorrow\" в БД (БАГ, ИСПРАВЛЕНО 08.05.2026)**
    `cmd_add`, `cmd_list`, `cmd_postpone` не парсили "tomorrow"/"today"/"завтра"/"сегодня" в ISO-дату.
    **Фикс:** добавлена функция `parse_date(s)` в ~/.local/bin/t, вызывается во всех трёх местах.
 
@@ -170,6 +221,8 @@ t habit-add "Работа" --days "Mon,Tue,Wed,Thu,Fri"
    conn.execute('PRAGMA table_info(tasks)').fetchall()
    ```
    Поле `due_date` хранит ТОЛЬКО дату (YYYY-MM-DD), время — только в `name`.
+
+9. **⚠️ Задачи с 5+ carry_over — сигнал к пересмотру** — если задача переносилась 5+ раз (например, [35] english-lesson — 6 раз, [68] Ассистент — 5 раз), она превратилась в «вечный хвост». При каждом переносе обращать внимание пользователя: «эта задача переносится N-й раз — может, отменить или переформулировать?»
 
 ## Связь привычек и периодических задач
 

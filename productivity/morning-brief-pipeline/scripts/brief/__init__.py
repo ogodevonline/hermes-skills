@@ -7,6 +7,7 @@ import json
 import requests
 import re
 import urllib.parse
+import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -141,7 +142,21 @@ def split_to_chunks(text: str, max_len: int) -> list[str]:
     return result
 
 
-def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog):
+def get_hub_status() -> str:
+    """Выполнить hermes-hub и вернуть результат."""
+    try:
+        hub_path = os.path.expanduser("~/.local/bin/hermes-hub")
+        if not os.path.exists(hub_path):
+            return "⚠️ hermes-hub не установлен"
+        r = subprocess.run([hub_path], capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            return r.stdout.strip()
+        return f"⚠️ hermes-hub: {r.stderr.strip()}"
+    except Exception as e:
+        return f"⚠️ hermes-hub: {e}"
+
+
+def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status):
     """Форматировать бриф как список чанков (отдельные сообщения)"""
     now_msk = datetime.now(MSK)
     day_full = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
@@ -158,6 +173,12 @@ def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, works
     # Блок 1: Статус системы + Погода (самые важные)
     chunk_system = f"⚡️ **Статус системы**\n{infra}\n\n🌦️ **Погода — Москва**\n{weather}\n\n🎯 **Главное на сегодня:** {one_thing}"
     chunks.extend(split_to_chunks(chunk_system, MAX_LEN))
+
+    # Блок 1.5: Состояние системы (hub)
+    hub_clean = simplify_links(hub_status)
+    if hub_clean.strip():
+        hub_block = f"📊 **Состояние системы**\n{hub_clean}"
+        chunks.extend(split_to_chunks(hub_block, MAX_LEN))
 
     # Блок 2: Почта — заголовок уже есть в данных
     inbox_clean = simplify_links(inbox)
@@ -217,8 +238,11 @@ def generate_brief():
     # Бэклог
     backlog = get_backlog()
 
+    # Hub
+    hub_status = get_hub_status()
+
     # Форматировать как чанки
-    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog)
+    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status)
 
     # Собрать полный бриф для сохранения в файл
     full_brief = "\n\n".join(chunks)

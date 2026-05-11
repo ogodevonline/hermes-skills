@@ -24,20 +24,20 @@ def _count_tasks(status_output: str) -> int:
 
 
 def get_workspace_tasks() -> str:
-    """Задачи на сегодня из SQLite (все, без разделения на личные/рабочие)"""
+    """Задачи на сегодня из SQLite (только активные — без выполненных ✅)"""
     raw = _run_t("list")
     if not raw:
         return "💻 Задачи: пусто"
 
     lines = [l.strip() for l in raw.split("\n") if l.strip()]
-    status = _run_t("status")
-    count = _count_tasks(status)
+    # Отфильтровываем выполненные задачи (строка начинается с ✅)
+    active_lines = [l for l in lines if not l.startswith("✅")]
 
-    if not lines:
-        return "💻 Задачи: пусто"
+    if not active_lines:
+        return "💻 Задачи: ✅ всё сделано"
 
-    result = [f"💻 Задачи — {count} шт.:"]
-    for line in lines:
+    result = [f"💻 Задачи — {len(active_lines)} шт.:"]
+    for line in active_lines:
         result.append(f"  {line}")
     return "\n".join(result)
 

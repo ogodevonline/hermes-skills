@@ -8,7 +8,7 @@ import sys, os, json, datetime, subprocess, re
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
-from obsidian_utils import write_note, commit_all, get_vault_path
+from obsidian_utils import write_note, write_section, commit_all, get_vault_path
 
 STATE_FILE = Path.home() / ".hermes" / ".evening_state.json"
 TODAY = None  # будет установлен из --date YYYY-MM-DD
@@ -52,7 +52,8 @@ def build_diary(tasks, answers):
     today_str = dt.strftime("%d %B %Y (%A)")
     lines = []
     lines.append("# 📖 Вечерний дневник")
-    lines.append(f"**{today_str}**\n")
+    lines.append(f"**{today_str}**")
+    lines.append("")
     lines.append("## 📋 Статусы задач")
     done = 0
     for t in tasks:
@@ -60,7 +61,9 @@ def build_diary(tasks, answers):
         st = answers.get(name, "⏳")
         if st == "✅": done += 1
         lines.append(f"- {st} **{name}**")
-    lines.append(f"\n**Итого:** {done}/{len(tasks)} выполнено\n")
+    lines.append("")
+    lines.append(f"**Итого:** {done}/{len(tasks)} выполнено")
+    lines.append("")
     qs = [
         "1. Что сегодня прошло ХОРОШО?",
         "2. Где я облажался / можно лучше?",
@@ -71,8 +74,23 @@ def build_diary(tasks, answers):
     lines.append("## 💭 Ответы")
     for q in qs:
         a = answers.get(q, "_ _")
-        lines.append(f"\n**{q}**  \n  {a}")
-    lines.append(f"\n_Написано: {datetime.datetime.now().strftime('%H:%M МСК')}_")
+        lines.append("")
+        lines.append(f"**{q}**")
+        lines.append(f"  {a}")
+    # ── Цели (goals-checkin) ──
+    try:
+        goals_checkin = subprocess.run(
+            ["python3", str(Path.home() / ".hermes" / "skills" / "productivity" / "life-planning" / "scripts" / "planning.py"), "--goals-checkin"],
+            capture_output=True, text=True, timeout=10
+        )
+        if goals_checkin.stdout.strip():
+            lines.append("")
+            lines.append(f"## 🎯 ПРОВЕРКА ЦЕЛЕЙ")
+            lines.append(goals_checkin.stdout.strip())
+    except Exception:
+        pass
+    lines.append("")
+    lines.append(f"_Написано: {datetime.datetime.now().strftime('%H:%M МСК')}_")
     return "\n".join(lines)
 
 def start_new():
@@ -134,7 +152,7 @@ def handle_reply(text):
         if idx >= 5:
             tasks = load_data_for_date(TODAY).get("today", [])
             diary = build_diary(tasks, state["answers"])
-            write_note(f"Дневник/{TODAY}.md", diary)
+            write_section(f"Дневник/{TODAY}.md", "# 📖 Вечерний дневник", diary)
             commit_all(f"diary {TODAY}")
             out = get_vault_path() / "Дневник" / f"{TODAY}.md"
             clear_state()

@@ -1,9 +1,10 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior. 4-phase root cause investigation — NO fixes without understanding the problem first.
+description: "4-phase root cause debugging: understand bugs before fixing."
 version: 1.1.0
 author: Hermes Agent (adapted from obra/superpowers)
 license: MIT
+platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [debugging, troubleshooting, problem-solving, root-cause, investigation]
@@ -34,6 +35,7 @@ Use for ANY technical issue:
 - Test failures
 - Bugs in production
 - Unexpected behavior
+- **System feels slow / tools are laggy** (often disk or memory, not code)
 - Performance problems
 - Build failures
 - Integration issues
@@ -53,6 +55,41 @@ Use for ANY technical issue:
 ## The Four Phases
 
 You MUST complete each phase before proceeding to the next.
+
+---
+
+## Phase 0: System Resource Check (for Performance/Slowness Issues)
+
+**BEFORE Phase 1 — only when user reports tools/shell being slow or laggy:**
+
+### 0.1 Check Disk Space
+
+Low disk space (< 10-15% free) causes cryptic slowdowns, write failures, and tool hangs.
+
+```bash
+df -h /
+```
+
+If disk is >85% full, the **top cache hogs** to check (often reclaim 2-5G):
+
+| Cache | Check | Clean |
+|-------|-------|-------|
+| uv/pip | `du -sh ~/.cache/uv/ ~/.cache/pip/` | `uv cache clean` |
+| Browser profiles | `du -sh ~/.cache/camoufox/` | `rm -rf ~/.cache/camoufox/` |
+| Playwright browsers | `du -sh ~/.cache/ms-playwright/` | `rm -rf ~/.cache/ms-playwright/` |
+| HF cache | `du -sh ~/.cache/huggingface/` | `rm -rf ~/.cache/huggingface/` |
+| Old Hermes sessions | `du -sh ~/.hermes/sessions/` | Delete files > 7 days by date prefix |
+
+### 0.2 Check Memory & Load
+
+```bash
+free -h           # available memory
+uptime            # load average (should be < CPU cores)
+```
+
+### 0.3 If System Healthy → Proceed to Phase 1
+
+If disk >15% free, memory OK, load low — the issue is likely code-level, not infrastructure.
 
 ---
 
