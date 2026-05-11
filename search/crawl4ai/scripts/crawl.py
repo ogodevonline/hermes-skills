@@ -66,6 +66,7 @@ def parse_listing_prices(content: str, listings: list[dict]) -> list[dict]:
 
     OLX format in markdown:
       #### [Title](url)
+      ...
       price сум
 
     Returns enriched listings: {title, price, url}
@@ -73,36 +74,32 @@ def parse_listing_prices(content: str, listings: list[dict]) -> list[dict]:
     # Extract all title+url pairs from markdown: #### [text](url)
     title_map = {}
     for m in re.finditer(r'#### \[([^\]]+)\]\(([^)]+)\)', content):
-        title_map[m.group(2)] = m.group(1).strip()
+        title_map[m.group(2).rstrip("/")] = m.group(1).strip()
 
-    # Extract all prices: lines with "сум" containing digits
-    price_lines = []
-    for line in content.split("\n"):
-        line = line.strip()
-        if "сум" in line and re.search(r"\d", line):
-            # Clean price: "1 500 000 000 сумДоговорная" -> "1 500 000 000 сум"
-            price = re.sub(rf"(сум).*$", r"\1", line)
-            price_lines.append(price)
+    # Extract all price lines
+    price_positions = []  # (position, price_text)
+    for m in re.finditer(r"(\d[\d\s]{3,}\d)\s*(сум|USD|\$|₽)", content):
+        price_positions.append((m.start(), m.group(0).strip()))
 
-    # Match listings with their prices by position
     result = []
     for listing in listings:
-        url = listing["url"]
+        url = listing["url"].rstrip("/")
         title = title_map.get(url, listing["text"] or url.split("/")[-1])
-        # Find closest price in content before/around this listing's position
+
+        # Find price: closest price AFTER this listing's title position
         price = ""
         idx = content.find(url)
-        if idx >= 0:
-            # Look for nearest price after this listing in content
-            after = content[idx:idx+500]
-            pm = re.search(r"(\d[\d\s]*\d\s*(?:сум|USD|\$|₽))", after)
-            if pm:
-                price = pm.group(1).strip()
+        if idx >= 0 and price_positions:
+            # Find the first price AFTER this listing's URL
+            for pos, ptxt in price_positions:
+                if pos > idx:
+                    price = ptxt
+                    break
 
         result.append({
             "title": title,
             "price": price,
-            "url": url,
+            "url": listing["url"],
         })
 
     return result
@@ -173,15 +170,34 @@ async def crawl_pages(
         screenshot=False,
         pdf=False,
         page_timeout=page_timeout,
-        wait_until="domcontentloaded",
-        delay_before_return_html=0.1,
+        wait_until="networkidle2",
+        delay_before_return_html=1.0,
         magic=True,
+        simulate_user=True,
+        override_navigator=True,
         remove_consent_popups=True,
         exclude_social_media_links=True,
         exclude_external_links=True,
+        scan_full_page=True,
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     )
 
-    async with AsyncWebCrawler(verbose=verbose) as crawler:
+    async with AsyncWebCrawler(
+        verbose=verbose,
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        },
+    ) as crawler:
         urls_to_crawl = [start_url]
         page_num = 0
 
