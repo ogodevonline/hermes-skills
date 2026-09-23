@@ -7,7 +7,7 @@ description: Где лежат навыки владельца и как их с
 
 | Что | Где | Кто меняет |
 |---|---|---|
-| Навыки ассистента Hermes (брифы, дневник, OLX, дом…) | `~/.hermes/skills` = репо `ogodevonline/hermes-skills` | ты: создавай здесь, коммить и пушь в hermes-skills |
+| Навыки ассистента Hermes (брифы, дневник, OLX, дом…) | `~/.hermes/skills` = репо `ogodevonline/hermes-skills` | ты: создавай здесь; коммит и push делает cron ежедневно в 04:30 UTC (~/bin/skills-autocommit.sh, лог ~/logs/skills-autocommit.log), найденный секрет блокирует коммит |
 | Общие навыки владельца для всех агентов (код, git, lead-platform, канал, money-suite) | `~/Projects/Personal/GitHub/agent-skills/skills` (подключено через `skills.external_dirs`) | владелец на ноутбуке; здесь только `git pull`, сам не правь без просьбы |
 | Чужие навыки | `~/.agents/skills` (подключено через `skills.external_dirs`), список — `agent-skills/third-party.txt` | через `npx skills`, не копией |
 | Большие чужие наборы (Show Me The Money) | `~/.agents/vendor/<набор>`, агентам — один указатель (`money-suite`) | `vendor.txt` + `git pull` |
