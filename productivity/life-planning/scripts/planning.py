@@ -5,7 +5,7 @@
   1. Obsidian дневники за период (задачи ✅, привычки ✅, 8 сфер, рефлексия)
   2. MEMORY.md — все факты
   3. USER.md — профиль
-  4. Планы из Планирование/ — 4 предыдущих + текущий
+  4. Планы из Projects/Planning/ — 4 предыдущих + текущий
 
 Не вызывает t list / t habits — дневники содержат всё.
 Выдаёт JSON.
@@ -15,9 +15,9 @@ import json, sys, datetime, re
 from pathlib import Path
 
 HOME = Path.home()
-DIARY = HOME / "hermes-vault" / "Дневник"
-PLANS = HOME / "hermes-vault" / "Планирование"
-PROJECTS = HOME / "hermes-vault" / "Проекты"
+DIARY = HOME / "hermes-vault" / "Journal"
+PLANS = HOME / "hermes-vault" / "Projects" / "Planning"
+PROJECTS = HOME / "hermes-vault" / "Projects"
 MEMORY_FILE = HOME / ".hermes" / "memories" / "MEMORY.md"
 USER_FILE = HOME / ".hermes" / "memories" / "USER.md"
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
@@ -25,7 +25,8 @@ SPHERE_EMOJIS = r'[💼❤️👨‍👩‍👧📚💪🏠🤝🎮🎯]'
 
 
 def parse_diary(path):
-    """Парсит дневник: задачи ✅, привычки ✅, 8 сфер, рефлексия."""
+    """Парсит дневник: задачи ✅, привычки ✅, 8 сфер, рефлексия.
+    Возвращает None если файла нет, иначе dict с is_empty."""
     if not path.exists():
         return None
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -35,7 +36,8 @@ def parse_diary(path):
         "done_tasks": [],
         "done_habits": [],
         "spheres": {},
-        "reflections": {}
+        "reflections": {},
+        "is_empty": True
     }
 
     in_section = None  # tasks / habits / spheres / none
@@ -65,15 +67,15 @@ def parse_diary(path):
 
         # Сферы: | 💼 Карьера | 7 | текст | или | 💼 Карьера | текст |
         if in_section == "spheres":
-            m = re.search(r'\|\s*' + SPHERE_EMOJIS + r'\s*(.+?)\s*\|\s*(\d+)\s*\|', line)
+            m = re.search(r'\|[\s\uFE0F\u200D]*' + SPHERE_EMOJIS + r'[\s\uFE0F\u200D]*(.+?)\s*\|\s*(\d+)\s*\|', line)
             if m:
                 result["spheres"][m.group(1).strip()] = {"score": int(m.group(2))}
                 continue
-            m = re.search(r'\|\s*' + SPHERE_EMOJIS + r'\s*(.+?)\s*\|\s*(.+?)\s*\|', line)
+            m = re.search(r'\|[\s\uFE0F\u200D]*' + SPHERE_EMOJIS + r'[\s\uFE0F\u200D]*(.+?)\s*\|\s*(.+?)\s*\|', line)
             if m:
                 result["spheres"][m.group(1).strip()] = {"comment": m.group(2).strip()}
 
-    # Рефлексия (5 вопросов) — ищем **1. ...?** текст
+    # Рефлексия (5 вопросов)
     for q in range(1, 6):
         m = re.search(
             r'\*\*' + str(q) + r'\.\s*(.+?)\?\*\*\s*\n(.+?)(?:\n\n|\Z)',
@@ -81,6 +83,18 @@ def parse_diary(path):
         )
         if m:
             result["reflections"][f"q{q}"] = m.group(2).strip()
+
+    # Детект пустого шаблона
+    all_reflections_empty = all(
+        v.strip(" _") == "" for v in result["reflections"].values()
+    ) if result["reflections"] else True
+    no_content = (
+        len(result["done_tasks"]) == 0
+        and len(result["done_habits"]) == 0
+        and len(result["spheres"]) == 0
+        and all_reflections_empty
+    )
+    result["is_empty"] = no_content
 
     return result
 
@@ -104,15 +118,15 @@ def get_diaries(period="week", now=None):
 
 
 def get_plans(period="week", now=None, count=5):
-    """Читает ВСЕ файлы планов из Планирование/ + проекты из Проекты/."""
+    """Читает ВСЕ файлы планов из Projects/Planning/ + проекты из Projects/."""
     result = {}
 
-    # Читаем всё из Планирование/
+    # Читаем всё из Projects/Planning/
     if PLANS.exists():
         for f in sorted(PLANS.glob("*.md"), reverse=True):
             result[f.stem] = f.read_text(encoding="utf-8", errors="replace")
 
-    # Добавляем проекты из Проекты/
+    # Добавляем проекты из Projects/
     if PROJECTS.exists():
         for f in sorted(PROJECTS.rglob("*.md")):
             rel = str(f.relative_to(PROJECTS))
@@ -141,7 +155,7 @@ def generate(period="week", now=None):
     elif isinstance(now, str):
         now = datetime.date.fromisoformat(now)
 
-    diaries = get_diaries(period, now)
+    diaries = [d for d in get_diaries(period, now) if not d.get("is_empty", True)]
     plans = get_plans(period, now)
     user = read_text_files()
 
@@ -160,6 +174,18 @@ def generate(period="week", now=None):
             sc = sphere_summary[s]["scores"]
             sphere_summary[s]["avg"] = round(sum(sc) / len(sc), 1)
 
+    # Конвертация sphere_summary → sphere_trends для совместимости с hermes-hub
+    SPHERE_EMOJI = {
+        "Карьера": "💼", "Лима": "❤️", "Семья": "👨‍👩‍👧", "Развитие": "📚",
+        "Здоровье": "💪", "Быт": "🏠", "Друзья": "🤝", "Отдых": "🎮",
+    }
+    sphere_trends = []
+    for name, data in sphere_summary.items():
+        entry = {"name": name, "emoji": SPHERE_EMOJI.get(name, "📌"), "avg": data.get("avg", 0)}
+        if isinstance(entry["avg"], (int, float)) and entry["avg"] < 5:
+            entry["direction"] = "🔻"
+        sphere_trends.append(entry)
+
     # Статистика по неделе
     week_stats = {"days_with_diary": len(diaries), "total_done_tasks": 0, "total_done_habits": 0}
     for d in diaries:
@@ -174,6 +200,7 @@ def generate(period="week", now=None):
         },
         "week_stats": week_stats,
         "sphere_summary": sphere_summary,
+        "sphere_trends": sphere_trends,
         "diaries": [
             {
                 "date": d["date"],
@@ -193,7 +220,46 @@ def generate(period="week", now=None):
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def goals_checkin():
+    """Краткая текстовая сводка целей на сегодня (для вечернего брифа).
+    Считает с начала текущей недели (понедельник) по сегодня."""
+    today = datetime.date.today()
+    week_start = today - datetime.timedelta(days=today.weekday())  # понедельник
+    week_diaries = [d for d in get_diaries("week", today) if not d.get("is_empty", True)]
+    # Оставляем только с начала недели
+    week_diaries = [d for d in week_diaries if d["date"] >= week_start.isoformat()]
+
+    streak = 0
+    for d in sorted(week_diaries, key=lambda x: x["date"], reverse=True):
+        if d["done_tasks"] or d["done_habits"]:
+            streak += 1
+        else:
+            break
+
+    total_tasks = sum(len(d["done_tasks"]) for d in week_diaries)
+    total_habits = sum(len(d["done_habits"]) for d in week_diaries)
+
+    # Последний дневник
+    last = week_diaries[0] if week_diaries else None
+    spheres_text = ""
+    if last and last["spheres"]:
+        low = [s for s, v in last["spheres"].items() if isinstance(v, dict) and v.get("score", 10) < 6]
+        if low:
+            spheres_text = f"⚠️ Просадки: {', '.join(low)}"
+
+    lines = [f"📊 {week_start.isoformat()}–{today.isoformat()}: ✅ {total_tasks} задач · привычки ✅ {total_habits} раз(а)"]
+    if streak > 1:
+        lines.append(f"🔥 Streak: {streak} дней подряд")
+    if spheres_text:
+        lines.append(spheres_text)
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
+    if "--goals-checkin" in sys.argv:
+        print(goals_checkin())
+        sys.exit(0)
+
     period = "week"
     now_arg = None
     for i, a in enumerate(sys.argv[1:]):

@@ -19,12 +19,12 @@ description: Персональный планировщик жизни — 5 г
 
 ## Запуск
 ```bash
-cd ~/.hermes/skills/brief/planning/scripts
+cd ~/.hermes/scripts/
 
-python3 planning.py                    # неделя
-python3 planning.py --period month     # месяц
-python3 planning.py --period quarter   # квартал
-python3 planning.py --now "2026-06-01" # от указанной даты
+python3 ~/.hermes/scripts/planning.py                    # неделя
+python3 ~/.hermes/scripts/planning.py --period month     # месяц
+python3 ~/.hermes/scripts/planning.py --period quarter   # квартал
+python3 ~/.hermes/scripts/planning.py --now "2026-06-01" # от указанной даты
 ```
 
 ## 8 сфер (синхронизированы с evening-diary-brief)

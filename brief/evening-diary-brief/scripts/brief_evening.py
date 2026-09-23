@@ -31,7 +31,7 @@ def build_spheres_block():
     return "\n".join(lines)
 
 
-DIARY_DIR = get_vault_path() / "Дневник"
+DIARY_DIR = get_vault_path() / "Journal"
 
 
 def dotenv_get(key):
@@ -148,7 +148,7 @@ def save_diary_template():
     ])
     content = "\n".join(lines)
     fpath = DIARY_DIR / f"{today}.md"
-    write_section(f"Дневник/{today}.md", "# 📖 Вечерний дневник", content)
+    write_section(f"Journal/{today}.md", "# 📖 Вечерний дневник", content)
     commit_all(f"diary {today}: template")
     return fpath
 
@@ -256,7 +256,7 @@ def interactive_mode():
     print(f"{'='*60}")
     
     fpath = DIARY_DIR / f"{today}.md"
-    write_section(f"Дневник/{today}.md", "# 📖 Вечерний дневник", diary)
+    write_section(f"Journal/{today}.md", "# 📖 Вечерний дневник", diary)
     commit_all(f"diary {today}")
     print(f"\n💾 Сохранено: {fpath}")
 

@@ -1,24 +1,44 @@
 ---
 name: crawl4ai
 category: search
-description: "Глубокий анализ сайтов: вытаскивает весь контент страницы в markdown через crawl4ai + Playwright. Для динамических сайтов (JS, SPA), которые httpx не берёт."
+description: "Глубокий анализ сайтов. Сначала httpx + BeautifulSoup (быстрее). Crawl4ai (Playwright) — запасной вариант для SPA/JS, когда httpx не берёт."
 ---
 
 # Crawl4AI — Deep Site Scraper
 
-Для сайтов с JS-рендерингом, бесконечной прокруткой, SPA.  
-Заходит в браузер (Playwright), ждёт загрузки, вытаскивает всё в markdown.
+## 🔑 Приоритет: httpx + BeautifulSoup FIRST
 
-**Скрипт:** `~/.hermes/skills/search/crawl4ai/scripts/crawl.py`
+**Прежде чем лезть в crawl4ai — попробуй httpx + BeautifulSoup.** Многие сайты (OLX, Avito, Telegram t.me/s/) отлично парсятся обычными HTTP запросами:
 
-## Когда использовать
+- **Быстрее** — 1-2 сек вместо 5-15 сек на Playwright
+- **Нет блокировок** — CloudFront/Cloudflare часто блокируют именно headless браузеры
+- **Меньше зависимостей** — не нужен Playwright/Chromium
+- **SSR данные** — многие классифайды (OLX) вставляют данные в JSON-LD (schema.org)
 
-- **Классифайды**: OLX, Avito, CIAN — вытащить все объявления
-- **Маркетплейсы**: Ozon, Wildberries — цены, описания, отзывы
-- **SPA-сайты**: React/Vue/Angular — где httpx ловит пустую обёртку
-- **Планирование**: booking.com, отели, билеты — реальный контент
+```python
+import httpx
+from bs4 import BeautifulSoup
 
-Не использовать для: простых статей/новостей (там `web-search-scraper` быстрее).
+headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}
+resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=30)
+soup = BeautifulSoup(resp.text, "lxml")
+```
+
+**Откат на crawl4ai только если:**
+- Сайт SPA (React/Vue/Angular) и JSON в HTML нет
+- Браузерное поведение (прокрутка, hover, клики)
+- httpx возвращает пустую обёртку или 403/CloudFront
+
+## Когда что использовать
+
+| Тип сайта | Пробуй сначала | Если не работает |
+|-----------|----------------|----------------|
+| **Классифайды** (OLX, Avito) | `httpx + BS4` — ищи JSON-LD schema.org ItemList | crawl4ai |
+| **Telegram каналы** (t.me/s/) | `httpx + BS4` — парсинг tgme_widget_message | crawl4ai с stealth |
+| **Маркетплейсы** | `httpx + BS4` | crawl4ai |
+| **SPA-сайты** (React/Vue) | crawl4ai | web-extract |
+| **Travel aggregators** (Aviasales, Skyscanner, Яндекс.Путешествия) | crawl4ai — SPA, динамические цены | web-extract |
+| **Статьи/новости** | web-search-scraper | httpx |
 
 ## Установка
 
@@ -28,7 +48,7 @@ uv sync
 playwright install chromium  # если не установлен ранее
 ```
 
-## Использование
+## Использование crawl4ai (для SPA/JS)
 
 ```bash
 cd ~/.hermes/skills/search/crawl4ai/scripts
@@ -46,7 +66,7 @@ uv run python crawl.py --url "https://..." --max-pages 5 --timeout 60000 --outpu
 uv run python crawl.py --url "https://..." --quiet
 ```
 
-## Параметры
+## Параметры crawl.py
 
 | Параметр | По умолч. | Описание |
 |---|---|---|
@@ -58,47 +78,76 @@ uv run python crawl.py --url "https://..." --quiet
 | `--links-only` | — | Только {title, price, url} без full-content |
 | `--quiet` | — | Без лишнего вывода в stderr |
 
-## Формат результата
+## 🚨 CloudFront / Cloudflare bypass (crawl4ai)
 
-Без `--links-only`: JSON с `{pages[], listings[], total_pages, total_listings, total_chars}`.
-- `pages[]` — полный контент каждой страницы
-- `listings[]` — извлечённые объявления `{title, price, url}`
+Некоторые классифайды защищены CloudFront и блокируют headless Playwright.
 
-С `--links-only`: только `{listings[], total_listings, total_pages}` — для быстрого просмотра.
+**Симптомы:**
+- `"ERROR: The request could not be satisfied"` (403)
+- Title пустой или `ERROR`
+- `total_listings: 0`
 
-## Анализ классифайдов (OLX, Avito и др.)
-
-При работе с узбекскими/казахскими классифайдами описания часто на местных языках (узбекский, каракалпакский). Порядок действий:
-
-1. Скрапинг: `crawl.py --url "..." --max-pages N --links-only` — получить все ссылки и цены
-2. Фильтр по бюджету: выбрать подходящие по цене
-3. Детальный обход: для каждого отобранного объявления запустить параллельный скрапинг (через единый AsyncWebCrawler + Semaphore, макс 3 конкурентных, таймаут 25с)
-4. Извлечь блок `### Описание` из markdown
-5. Перевести описание на русский язык (узбекский/каракалпакский→русский)
-
-При выводе длинных результатов (5+ объявлений с описаниями) — **использовать `send_message` в Telegram**, а не писать inline в чат. Пользователь предпочитает ссылки с заголовками, чтобы можно было кликнуть.
-
-### Пример параллельного обхода listing-ов
-
+**Stealth-конфигурация:**
 ```python
-# Один crawler на все URL, Semaphore(3) для контроля
-async with AsyncWebCrawler(verbose=False) as crawler:
-    sem = asyncio.Semaphore(3)
-    async def crawl_one(url):
-        async with sem:
-            result = await crawler.arun(url=url, config=config)
-            # extract ### Описание block from result.markdown
-    tasks = [crawl_one(u) for u in urls]
-    results = await asyncio.gather(*tasks)
+config = CrawlerRunConfig(
+    word_count_threshold=3,
+    cache_mode=CacheMode.BYPASS,
+    page_timeout=60000,
+    wait_until="networkidle2",
+    delay_before_return_html=1.0,
+    magic=True,
+    simulate_user=True,
+    override_navigator=True,
+    scan_full_page=True,
+    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+    remove_consent_popups=True,
+)
+
+async with AsyncWebCrawler(
+    verbose=verbose,
+    user_agent="...",
+    headers={"Accept": "text/html,...", "Accept-Language": "ru-RU,...",
+             "DNT": "1", "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate"},
+) as crawler:
+    ...
 ```
 
-### Известные паттерны URL объявлений
+**Если не помогает:** сделать паузу 30+ сек (CloudFront запомнил IP), попробовать httpx или **trafilatura** (`pip install trafilatura` — чистит HTML без браузера).
 
-Скрипт автоматически распознаёт:
+## 📐 Референс-файлы
+
+- **`references/olx-jsonld-parsing.md`** — парсинг OLX через JSON-LD (SSR), httpx+BS4
+- **`references/telegram-tme-parsing.md`** — парсинг Telegram каналов через t.me/s/
+- **`references/llm-listing-enrichment.md`** — батчевое LLM-обогащение: извлечение структуры + фильтр спама через DeepSeek
+- **`references/uzbek-classifieds-translation.md`** — перевод узбекских/каракалпакских объявлений
+- **`scripts/crawl.py`** — скрипт crawl4ai (для SPA-сайтов)
+
+## Интеграция с SQLite-мониторингом (upsert-паттерн)
+
+Стандартный пайплайн:
+
+1. **Скрапинг списка** → получаем [{title, price, url}]
+2. **Фильтр по бюджету в КОДЕ** — не через URL (параметры OLX ненадёжны)
+3. **LLM батч** — все новые тексты → структурированные данные + фильтр релевантности
+4. **Upsert в БД** — url_hash (SHA-256 URL) ⇒ INSERT OR UPDATE
+5. **Поиск исчезнувших** — active → sold
+
+**Workflow для OLX (httpx):**
+```python
+# 1 страница: ~40 объявлений, 2-3 сек
+# Детальный обход новых: ~1-2 сек на объявление
+```
+
+**Workflow для Telegram (httpx + LLM):**
+```python
+# t.me/s/<channel> → 5-50 постов → LLM батч → is_house? → структура → DB
+# 1 канал: ~20 сек (запрос + LLM)
+```
+
+## Известные паттерны URL объявлений
+
 - `/d/obyavlenie/` — OLX (рус)
 - `/obyavlenie/` — OLX alt
 - `/announce/` — OLX eng
 - `/item/` — Avito
 - `/a/` — Kufar и др.
-- `/product/` — маркетплейсы
-- `/ad/` — общий

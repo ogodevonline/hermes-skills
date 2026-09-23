@@ -3,7 +3,7 @@
 english_lesson.py — Управление изучением английского в Obsidian vault.
 
 Новая структура (сессии, а не главы):
-  Английский/
+  Learning/English/
   ├── state.yaml
   └── Книга-NNN-slug/
       ├── book.yaml
@@ -30,7 +30,7 @@ from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
+sys.path.insert(0, str(Path.home() / ".hermes" / "scripts"))
 from obsidian_utils import get_vault_path, write_note, commit_all
 
 
@@ -67,7 +67,7 @@ def _slugify(text: str) -> str:
 
 
 def _next_book_num(vault: Path) -> int:
-    eng_dir = vault / "Английский"
+    eng_dir = vault / "Learning" / "English"
     if not eng_dir.exists():
         return 1
     max_num = 0
@@ -95,7 +95,7 @@ def _save_yaml(path: Path, data):
 
 
 def _get_english_dir(vault: Path) -> Path:
-    d = vault / "Английский"
+    d = vault / "Learning" / "English"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -103,7 +103,7 @@ def _get_english_dir(vault: Path) -> Path:
 def _get_last_vocab(vault: Path, book_dir: str, session: int, count: int = 10) -> list:
     """Собрать последние count уникальных слов из vocabulary.md последних 3 сессий."""
     words = []
-    book_path = vault / "Английский" / book_dir
+    book_path = vault / "Learning" / "English" / book_dir
     start = max(1, session - 2)
     for s in range(start, session + 1):
         vocab_path = book_path / f"session-{s:03d}" / "vocabulary.md"
@@ -129,7 +129,7 @@ def _get_last_session_text(vault: Path, book_dir: str, session: int) -> str:
     """Прочитать text.md последней сессии."""
     if session == 0:
         return ""
-    book_path = vault / "Английский" / book_dir
+    book_path = vault / "Learning" / "English" / book_dir
     text_path = book_path / f"session-{session:03d}" / "text.md"
     if text_path.exists():
         return text_path.read_text(encoding='utf-8')
@@ -256,32 +256,53 @@ def cmd_save(args):
 
     # text.md
     if args.text:
-        text_rel = f"Английский/{book_name}/{session_dir}/text.md"
+        text_rel = f"Learning/English/{book_name}/{session_dir}/text.md"
         write_note(text_rel, args.text)
 
     # grammar.md
     if args.grammar:
-        grammar_rel = f"Английский/{book_name}/{session_dir}/grammar.md"
+        grammar_rel = f"Learning/English/{book_name}/{session_dir}/grammar.md"
         write_note(grammar_rel, args.grammar)
 
     # vocabulary.md
     if args.vocab:
-        vocab_rel = f"Английский/{book_name}/{session_dir}/vocabulary.md"
+        vocab_rel = f"Learning/English/{book_name}/{session_dir}/vocabulary.md"
         write_note(vocab_rel, args.vocab)
+
+    # Загрузить book.yaml (нужен для summary, chars, threads)
+    book_path_yaml = book_path / "book.yaml"
+    book_data = _load_yaml(book_path_yaml) or {}
 
     # Обновить book.yaml — summary
     if args.summary:
-        book_path_yaml = book_path / "book.yaml"
-        book_data = _load_yaml(book_path_yaml) or {}
         book_data["summary"] = args.summary
-        _save_yaml(book_path_yaml, book_data)
 
-        book_rel = f"Английский/{book_name}/book.yaml"
-        write_note(book_rel, yaml.dump(book_data, default_flow_style=False,
-                                       allow_unicode=True, sort_keys=False))
+    # Обновить book.yaml — character_sheets (JSON-строка → merge)
+    if args.chars:
+        try:
+            new_chars = json.loads(args.chars)
+            existing = book_data.get("character_sheets", {})
+            existing.update(new_chars)
+            book_data["character_sheets"] = existing
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Ошибка парсинга --chars: {e}", file=sys.stderr)
+
+    # Обновить book.yaml — plot_threads (JSON-строка → replace)
+    if args.threads:
+        try:
+            new_threads = json.loads(args.threads)
+            book_data["plot_threads"] = new_threads
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Ошибка парсинга --threads: {e}", file=sys.stderr)
+
+    # Сохранить book.yaml, если были изменения
+    _save_yaml(book_path_yaml, book_data)
+    book_rel = f"Learning/English/{book_name}/book.yaml"
+    write_note(book_rel, yaml.dump(book_data, default_flow_style=False,
+                                   allow_unicode=True, sort_keys=False))
 
     # Сохранить state.yaml
-    state_rel = "Английский/state.yaml"
+    state_rel = "Learning/English/state.yaml"
     state_content = yaml.dump(state, default_flow_style=False, allow_unicode=True, sort_keys=False)
     write_note(state_rel, state_content)
 
@@ -363,6 +384,8 @@ def main():
     p_save.add_argument("--grammar", required=True, help="Содержимое grammar.md (файл или строка)")
     p_save.add_argument("--vocab", default="", help="Содержимое vocabulary.md (файл или строка)")
     p_save.add_argument("--summary", default="", help="Новый summary для book.yaml (опционально)")
+    p_save.add_argument("--chars", default="", help="JSON: character_sheets для book.yaml (обновление/добавление)")
+    p_save.add_argument("--threads", default="", help="JSON: plot_threads для book.yaml (полная замена)")
     p_save.add_argument("--send", action="store_true", help="Отправить урок в Telegram после сохранения")
 
     # status

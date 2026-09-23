@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CLI трекер задач и привычек (SQLite)."""
-import sqlite3, sys, os, argparse, datetime, shutil
+import sqlite3, sys, os, argparse, datetime, shutil, json, subprocess
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -53,9 +53,9 @@ def init_db():
     conn.close()
 
 def add_days_column():
-    """Миграции: days, project, goal_id, tags."""
+    """Миграции: days, project, goal_id, tags, google_id."""
     conn = get_db()
-    for col, dtype in [("days", "TEXT DEFAULT '*'"), ("project", "TEXT DEFAULT ''"), ("goal_id", "TEXT DEFAULT ''"), ("tags", "TEXT DEFAULT ''")]:
+    for col, dtype in [("days", "TEXT DEFAULT '*'"), ("project", "TEXT DEFAULT ''"), ("goal_id", "TEXT DEFAULT ''"), ("tags", "TEXT DEFAULT ''"), ("google_id", "TEXT DEFAULT ''")]:
         try:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {dtype}")
         except Exception:
@@ -89,6 +89,90 @@ def parse_date(s):
     except ValueError:
         return None
 
+# ─── Google Tasks sync (best-effort, молча при недоступности) ───
+
+GT_SCRIPTS = Path.home() / ".hermes" / "skills" / "productivity" / "google-workspace" / "scripts"
+GT_TASKS_API = str(GT_SCRIPTS / "tasks_api.py")
+GT_LISTS = {"TODAY": "VDhuNDh2enVHY1I3TlBtUQ", "BACKLOG": "MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow",
+            "HABITS": "Y0c3NGFIRThRTnlWNFRpMg"}
+
+def gt_cli(*gargs):
+    """Вызвать tasks_api.py. (stdout, stderr, rc). GT_SYNC_OFF=1 — выключатель (для gtsync pull)."""
+    if os.environ.get("GT_SYNC_OFF"):
+        return "", "sync off", 1
+    try:
+        r = subprocess.run(["/usr/bin/python3", GT_TASKS_API, *gargs],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip(), r.stderr.strip(), r.returncode
+    except Exception as e:
+        return "", str(e), -1
+
+def gt_push(conn, tid, row):
+    """Создать карточку в Google; вернуть google_id или ''."""
+    lst = GT_LISTS["BACKLOG"] if row["status"] == "backlog" else GT_LISTS["TODAY"]
+    due = None
+    if row["due_date"]:
+        try:
+            datetime.datetime.strptime(row["due_date"][:10], "%Y-%m-%d")
+            due = f"{row['due_date'][:10]}T00:00:00.000Z"
+        except ValueError:
+            pass
+    gargs = ["add", row["name"], "--list-id", lst, "--notes", f"local:#{tid}"]
+    if due:
+        gargs += ["--due", due]
+    out, _, rc = gt_cli(*gargs)
+    if rc != 0:
+        return ""
+    try:
+        gid = json.loads(out.splitlines()[-1])["id"]
+    except Exception:
+        return ""
+    conn.execute("UPDATE tasks SET google_id=? WHERE id=?", (gid, tid))
+    conn.commit()
+    return gid
+
+def gt_touch(conn, tid, event="update"):
+    """Хук после add/done/cancel/postpone. event: push|done|cancel|update."""
+    try:
+        row = conn.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+        if not row or "google_id" not in row.keys():
+            return
+        gid = row["google_id"] or gt_push(conn, tid, row)
+        if not gid:
+            return
+        if event == "done":
+            gt_cli("complete", gid, "--list-id", GT_LISTS["TODAY"])
+            gt_cli("complete", gid, "--list-id", GT_LISTS["BACKLOG"])
+        elif event == "cancel":
+            gt_cli("delete", gid, "--list-id", GT_LISTS["TODAY"])
+            gt_cli("delete", gid, "--list-id", GT_LISTS["BACKLOG"])
+        elif event == "update" and row["due_date"]:
+            try:
+                datetime.datetime.strptime(row["due_date"][:10], "%Y-%m-%d")
+            except ValueError:
+                return
+            gt_cli("patch", gid, "--list-id", GT_LISTS["TODAY"],
+                   "--due", f"{row['due_date'][:10]}T00:00:00.000Z")
+    except Exception:
+        pass
+
+def habit_card_done(hid):
+    """Найти сегодняшнюю карточку привычки (созданную gtsync) и закрыть её."""
+    if not GT_SCRIPTS.exists():
+        return
+    d = today()
+    out, _, rc = gt_cli("tasks", GT_LISTS["HABITS"])
+    if rc != 0:
+        return
+    for line in out.splitlines():
+        try:
+            t = json.loads(line)
+        except Exception:
+            continue
+        if f"habit:#{hid} date={d}" in t.get("notes", "") and t.get("status") != "completed":
+            gt_cli("complete", t["id"], "--list-id", GT_LISTS["HABITS"])
+            return
+
 # ─── Задачи ─────────────────────────────────
 
 def cmd_add(args):
@@ -100,6 +184,7 @@ def cmd_add(args):
     )
     conn.commit()
     tid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    gt_touch(conn, tid, "push")
     parts = [f"[{args.priority}] {args.name}"]
     if args.reminder:
         parts.append(f"⏰ {args.reminder}")
@@ -123,6 +208,8 @@ def cmd_done(args):
     if cur.rowcount:
         t = conn.execute("SELECT name FROM tasks WHERE id=?", (args.id,)).fetchone()
         print(f"✅ {t['name']} — выполнено")
+        conn.commit()
+        gt_touch(conn, args.id, "done")
     else:
         print("⚠️ Задача не найдена или уже выполнена")
     conn.commit()
@@ -137,6 +224,8 @@ def cmd_cancel(args):
     if cur.rowcount:
         t = conn.execute("SELECT name FROM tasks WHERE id=?", (args.id,)).fetchone()
         print(f"❌ {t['name']} — отменено")
+        conn.commit()
+        gt_touch(conn, args.id, "cancel")
     else:
         print("⚠️ Задача не найдена или уже закрыта")
     conn.commit()
@@ -220,6 +309,8 @@ def cmd_postpone(args):
         t = conn.execute("SELECT name, carry_over FROM tasks WHERE id=?", (args.id,)).fetchone()
         carries = t["carry_over"]
         print(f"➡️  [{args.id}] {t['name']} → {new_date} (перенос #{carries})")
+        conn.commit()
+        gt_touch(conn, args.id, "update")
     else:
         print("⚠️ Задача не найдена или уже закрыта")
     conn.commit()
@@ -286,6 +377,9 @@ def cmd_habit_done(args):
         "INSERT INTO habit_log (habit_id, date, done, done_at) VALUES (?,?,1,?)",
         (args.id, date, now)
     )
+    conn.commit()
+    if not args.date:
+        habit_card_done(args.id)
     h = conn.execute("SELECT name FROM habits WHERE id=?", (args.id,)).fetchone()
     if h:
         cnt = conn.execute(

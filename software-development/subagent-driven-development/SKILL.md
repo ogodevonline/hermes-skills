@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [delegation, subagent, implementation, workflow, parallel]
-    related_skills: [writing-plans, requesting-code-review, test-driven-development]
+    related_skills: [writing-plans, requesting-code-review, test-driven-development, codegraph-cli]
 ---
 
 # Subagent-Driven Development
@@ -60,6 +60,8 @@ For EACH task in the plan:
 #### Step 1: Dispatch Implementer Subagent
 
 Use `delegate_task` with complete context:
+
+> When the codebase is unfamiliar, tell the implementer to load `codegraph-cli` skill and use CodeGraph CLI (`codegraph context "что делает X"`) for codebase exploration before writing code. This is faster than reading raw files one by one.
 
 ```python
 delegate_task(
@@ -203,6 +205,21 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
 
 ## Red Flags — Never Do These
 
+- **Assume delegate_task children know vault/project conventions.** A child agent has NO memory of AGENTS.md, SOUL.md, vault rules, or project conventions unless you EXPLICITLY include them in `context`. Always pass: «Follow the vault conventions: every .md file must have node_type in frontmatter. Read AGENTS.md first.» If you forget, the child creates files without frontmatter, breaking lint gates.
+
+  **Gotham-специфика:** если задача пишет в Obsidian vault/Knowledge Base, в `context` ОБЯЗАТЕЛЬНО передай:
+  ```python
+  context="""
+  Vault frontmatter rules: см. /home/hermes/hermes-vault/AGENTS.md
+  Каждый .md файл обязан иметь frontmatter с:
+  - node_type: из списка (journal, note, plan, book, profile, log, summary, task, reflection, index...)
+  - status: draft | active | done | cancelled | archived
+  - created: YYYY-MM-DD
+  - updated: YYYY-MM-DD
+  После создания .md — проверь что он начинается с ---\nnode_type: ...
+  """
+  ```
+
 - Start implementation without a plan
 - Skip reviews (spec compliance OR code quality)
 - Proceed with unfixed critical/important issues
@@ -215,6 +232,10 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
 - Let implementer self-review replace actual review (both are needed)
 - **Start code quality review before spec compliance is PASS** (wrong order)
 - Move to next task while either review has open issues
+- **Когда subagent упал с timeout — не делай работу сам молча.** Диагностируй: посмотри tool_trace (какие инструменты звал), выяви причину (скорее всего web_extract). Скажи пользователю причину. Перезапусти с исправленными инструкциями.
+- **Давать subagent'у путаное задание.** Не меняй цель между попытками. Если первая попытка упала — повтори с тем же goal + "не используй web_extract", не делай сам.
+- **Игнорировать date range.** Если пользователь сказал "с 10 по 17 число" — это значит перебрать все даты, а не гадать одну. Пропиши явно в goal суб-агента: "Перебери КАЖДУЮ дату в диапазоне. Найди минимальную цену на ЛЮБУЮ из этих дат."
+- **Subagent прервался, но часть работы сделана.** Когда `delegate_task` возвращает interrupted — **не делай всё заново**. Посмотри `tool_trace` в результате, чтобы понять какие инструменты он успел вызвать. Если были `write_file` — проверь что реально создано (`ls`), потом заверши оставшееся руками или через новый delegate_task с goal "доделай то, что не успел". Не перезаписывай уже созданные файлы — только недостающие.
 
 ## Handling Issues
 

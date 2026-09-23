@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Парсит `t habits` и сохраняет форматированный лог в Привычки/YYYY-MM-DD.md."""
+"""Парсит `t habits` и сохраняет форматированный лог в Areas/Habits/YYYY-MM-DD.md."""
 
 import datetime, subprocess, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "brief"))
+sys.path.insert(0, str(Path.home() / ".hermes" / "scripts"))
 from obsidian_utils import write_note, commit_all
 
 
@@ -89,7 +89,7 @@ def main():
     today = datetime.date.today().isoformat()
     content = format_habits_md(done_list, pending_list, total, done_count)
 
-    write_note(f"Привычки/{today}.md", content)
+    write_note(f"Areas/Habits/{today}.md", content)
     commit_all(f"habits {today}")
 
     # Печатаем краткий итог

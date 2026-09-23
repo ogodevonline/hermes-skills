@@ -137,7 +137,8 @@ After discovery, MCP tools are automatically injected into all `hermes-*` platfo
 - Each server runs as a long-lived asyncio Task in a background daemon thread
 - Connections persist for the lifetime of the agent process
 - If a connection drops, automatic reconnection with exponential backoff kicks in (up to 5 retries, max 60s backoff)
-- On agent shutdown, all connections are gracefully closed
+- On agent shutdown, the MCP connection (asyncio task) is closed, but **the child OS process is NOT terminated** — it becomes an orphan under PID 1 and continues consuming memory
+- Each Hermes session (CLI, gateway, Kanban worker) spawns its OWN independent MCP subprocess. N sessions = N codegraph instances
 
 ### Idempotency
 
@@ -238,10 +239,62 @@ pip install --upgrade mcp
 - Ensure the YAML indentation is correct
 - Look at Hermes Agent startup logs for connection messages
 - Tool names are prefixed with `mcp_{server}_{tool}` -- look for that pattern
+- **Tools discovered (`hermes mcp test` succeeds) but not in the agent's tool list:** the session started before MCP connected. Tools are only registered at agent startup. Run `/reset` (Telegram) or restart Hermes CLI to see them. Until then, use the MCP tool via CLI or direct JSON-RPC over stdin (see `references/codegraph-cli-fallback.md`). For full diagnostic workflow (checking mcp-stderr.log timestamps, agent.log registration lines, session vs server start ordering), see `references/mcp-timing-diagnostics.md`.
+  - **Use the `codegraph-cli` skill** (autonomous-ai-agents category) — it teaches subagents to use CodeGraph CLI commands directly via terminal (`codegraph context`, `codegraph query`, `codegraph callers/callees`, etc.)
+  - Or use direct JSON-RPC over stdin (see `references/codegraph-cli-fallback.md` in this skill)
 
-### Connection keeps dropping
+### Multiple orphaned MCP processes found (memory leak)
 
-The client retries up to 5 times with exponential backoff (1s, 2s, 4s, 8s, 16s, capped at 60s). If the server is fundamentally unreachable, it gives up after 5 attempts. Check the server process and network connectivity.
+If you see multiple instances of the same MCP server (e.g. 3-4 `codegraph serve` processes), each one was spawned by a different Hermes session that exited without cleaning up. Detect with:
+
+```bash
+ps aux | grep -E 'codegraph.*serve.*mcp' | grep -v grep | wc -l
+ps -eo pid,ppid,lstart,cmd --sort=-%mem | grep -E 'codegraph|mcp.*serve'
+```
+
+Cleanup: kill all orphaned instances except the one owned by the active gateway or your current CLI session.
+
+```bash
+# Find gateway's pid
+GW_PID=$(systemctl --user show hermes-gateway.service -p MainPID --value 2>/dev/null)
+# Kill codegraph instances NOT owned by gateway or your current session
+ps -eo pid,ppid,args --no-headers | grep -E 'codegraph.*serve.*mcp' | while read pid ppid rest; do
+  if [ "$ppid" != "$GW_PID" ] && [ "$ppid" != "$$" ]; then
+    echo "killing orphan $pid (parent $ppid)"
+    kill "$pid" 2>/dev/null
+  fi
+done
+```
+
+After cleanup, verify with `free -h` — expect significant memory recovery (each codegraph instance uses ~78MB RSS).
+
+**Root cause:** Hermes MCP client spawns the server as a stdio subprocess. On agent exit, the asyncio MCP session closes, but `process.terminate()` is NOT called on the child. The orphan survives under PID 1. This applies to ALL stdio-based MCP servers, not just codegraph.
+
+**Long-term fix (upstream):** patch `discover_mcp_tools()` / the MCP client to call `process.terminate()` or use `Popen` with `close_fds=True` + track child PIDs for cleanup on exit.
+
+**Workaround: use HTTP transport** — configure MCP servers via `url:` instead of `command:` so they run independently (systemd service, Docker, etc.) and Hermes just connects as a client. No orphan processes.
+
+### `hermes mcp add`
+
+**Root cause:** `hermes mcp add --args` uses argparse after the `mcp` subcommand. Any `--args` value that starts with `--` (e.g. `--mcp`, `--path`) is intercepted by the parent parser as a global flag before it reaches `mcp add`.
+
+**Fix:** Do NOT use `hermes mcp add` when the command's own arguments include double-dash flags. Instead, edit `~/.hermes/config.yaml` directly, adding `args` as a YAML list with each element on a separate line:
+
+```yaml
+mcp_servers:
+  my_server:
+    command: "codegraph"
+    args:
+    - serve
+    - --mcp
+    - --path
+    - /path/to/project
+    enabled: true
+```
+
+Then verify with `hermes mcp test my_server`.
+
+For commands without leading-dash args (e.g. `npx -y mcp-server-time`), `hermes mcp add` works fine.
 
 ## Examples
 
@@ -294,6 +347,43 @@ mcp_servers:
     timeout: 180
     connect_timeout: 30
 ```
+
+### CodeGraph — Code Knowledge Graph
+
+[CodeGraph](https://github.com/colbymchenry/codegraph) builds a local SQLite knowledge graph of your project (function calls, imports, inheritance) via tree-sitter. 21k+ stars, 19+ languages, framework-aware.
+
+Install: `curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh`
+
+Index a project: `cd /path/to/project && codegraph init -i`
+
+Add to Hermes via config.yaml (use direct edit, not `hermes mcp add`, because of the `--mcp` flag):
+
+```yaml
+mcp_servers:
+  codegraph:
+    command: "codegraph"
+    args:
+    - serve
+    - --mcp
+    - --path
+    - /path/to/project
+    enabled: true
+```
+
+Verify: `hermes mcp test codegraph`
+
+Add `--no-watch` to `args` to disable the file watcher on slow filesystems (WSL2 /mnt drives).
+
+Available tools after connection: `mcp_codegraph_search`, `mcp_codegraph_context`, `mcp_codegraph_trace`, `mcp_codegraph_impact`, `mcp_codegraph_explore`, and 5 more.
+
+**Pitfalls:**
+- **No markdown support:** CodeGraph uses tree-sitter and does NOT parse `.md` files. Indexing an Obsidian vault or docs-only repo produces minimal results (only JS/YAML/Python files get parsed). Stick to source-code projects.
+- **`codegraph uninit` requires confirmation:** pipe `echo "y" | codegraph uninit` or pass nothing to skip the prompt.
+- **Auto-sync via cron:** `codegraph sync` is incremental (seconds). Create a no_agent cron job (`cronjob(action='create', no_agent=true, script='cd /home/hermes/.hermes/skills && codegraph sync 2>&1')`) — when nothing changed, stdout is empty and no message is sent (silent watchdog pattern).
+- **Multiple instances pile up:** Each Hermes session (CLI, gateway, Kanban worker) spawns its own codegraph subprocess (~78MB RSS each). After several CLI sessions + gateway, 3-4 orphaned codegraph instances accumulate. See the "Multiple orphaned MCP processes found (memory leak)" troubleshooting section for detection and cleanup.
+- **Reuse design (limitation):** The ideal architecture is one codegraph per machine (run as systemd service), with all Hermes sessions connecting via HTTP transport or UNIX socket sharing. Currently each session spawns its own — fix is in `discover_mcp_tools()`: either (a) add `process.terminate()` on exit, or (b) use a singleton/connection-pool so only one codegraph runs.
+
+> **Fallback when MCP tools aren't visible in the agent's tool list** (session started before MCP connected): use CodeGraph's CLI commands directly, or direct JSON-RPC over stdin for MCP-only tools (`node`, `trace`, `explore`). See `references/codegraph-cli-fallback.md`.
 
 ### Multiple Servers
 

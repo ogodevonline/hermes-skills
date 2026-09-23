@@ -99,6 +99,54 @@ If a command exists in the TUI but doesn't show in autocomplete:
        return await self._handle_commandname(event)
    ```
 
+## Gateway AttributeError for CLI-Only Commands
+
+**Symptom:** Gateway crashes with `AttributeError: 'GatewayRunner' object has no attribute '_handle_<name>_command'` when a user invokes a slash command from a messaging platform (Telegram, Discord, etc.). The bot replies "Sorry, I encountered an error" and the session drops.
+
+**Root cause:** Some commands are marked `cli_only=True` in `COMMAND_REGISTRY` (e.g. `/tools`, `/skills`, `/cron`). They are excluded from `GATEWAY_KNOWN_COMMANDS` so they don't get dispatch. But they may still appear in the platform's command menu (via skill commands or plugin registration), and when the user invokes them, the gateway code tries to call `self._handle_<name>_command()` which doesn't exist.
+
+**Detection:**
+```bash
+# Check gateway logs for the specific error
+grep -i "AttributeError.*_handle.*command" ~/.hermes/logs/gateway.log
+
+# Find which CLI-only commands lack gateway handlers
+# Check commands.py for cli_only=True entries
+grep -B2 "cli_only=True" hermes_cli/commands.py | grep "CommandDef"
+
+# Cross-reference against existing gateway handlers
+grep -n "async def _handle_.*_command" gateway/run.py | grep -o "_handle_[a-z_-]*_command" | sort > /tmp/gateway_handlers.txt
+grep "CommandDef" hermes_cli/commands.py | grep -o '"[a-z_-]*"' | tr -d '"' | sort > /tmp/all_commands.txt
+comm -23 /tmp/all_commands.txt /tmp/gateway_handlers.txt  # commands without handlers
+```
+
+**Fix (two changes in gateway/run.py):**
+
+1. **Add dispatch block** in `_handle_message` (the `if canonical == "..."` chain, around line 7500-7600):
+   ```python
+   if canonical == "commandname":
+       return "🔧 `/commandname` — описание. Доступна только в CLI."
+   ```
+
+2. **Add handler method** in the GatewayRunner class (anywhere near other simple handlers):
+   ```python
+   async def _handle_commandname_command(self, event: MessageEvent) -> str:
+       """Handle /commandname — CLI-only command."""
+       return "🔧 `/commandname` — описание. Доступна только в CLI."
+   ```
+
+3. **Restart gateway** for changes to take effect:
+   ```bash
+   hermes gateway restart
+   ```
+
+4. **Verify** no new errors in logs after restart:
+   ```bash
+   sleep 5 && grep -i "error\|attribute" ~/.hermes/logs/gateway.log | tail -5
+   ```
+
+**Why this happens:** `GATEWAY_KNOWN_COMMANDS` (in `hermes_cli/commands.py`) is a frozenset derived from `COMMAND_REGISTRY` entries where `cli_only=False` or `gateway_config_gate` is set. `cli_only=True` commands are excluded. When a skill or plugin registers the same command name, the gateway's `_handle_message` dispatches via `if canonical == "name"` — if no block exists, it falls through to `GATEWAY_KNOWN_COMMANDS` check and reports "unrecognized command". But if someone previously patched a dispatch block in `_handle_message` without adding the method, you get the AttributeError.
+
 ## Common Issues
 
 1. **Command shows in TUI but not in autocomplete.** The command is defined in the TUI codebase but missing from `COMMAND_REGISTRY` in `hermes_cli/commands.py`. Autocomplete data ships from Python.

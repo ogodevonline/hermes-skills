@@ -113,6 +113,7 @@ from .tasks import get_one_big_thing
 from .gmail import get_gmail_inbox
 from .calendar import get_calendar
 from .habits import get_workspace_tasks, get_personal_and_habits, get_habits, get_backlog
+from .plan import get_plan_block
 
 
 def split_to_chunks(text: str, max_len: int) -> list[str]:
@@ -156,7 +157,7 @@ def get_hub_status() -> str:
         return f"⚠️ hermes-hub: {e}"
 
 
-def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status):
+def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status, plan_block):
     """Форматировать бриф как список чанков (отдельные сообщения)"""
     now_msk = datetime.now(MSK)
     day_full = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
@@ -169,6 +170,10 @@ def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, works
     chunks = [header]
 
     MAX_LEN = 2500  # Безопасный лимит для Telegram с Markdown
+
+    # Блок 0: План дня (самый важный — первым делом)
+    if plan_block.strip():
+        chunks.extend(split_to_chunks(plan_block, MAX_LEN))
 
     # Блок 1: Статус системы + Погода (самые важные)
     chunk_system = f"⚡️ **Статус системы**\n{infra}\n\n🌦️ **Погода — Москва**\n{weather}\n\n🎯 **Главное на сегодня:** {one_thing}"
@@ -214,6 +219,9 @@ def format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, works
 
 def generate_brief():
     """Сгенерировать полный утренний бриф и отправить чанками"""
+    # План дня (самое важное — первым делом)
+    plan_block = get_plan_block()
+
     # Погода
     weather = get_weather()
 
@@ -242,7 +250,7 @@ def generate_brief():
     hub_status = get_hub_status()
 
     # Форматировать как чанки
-    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status)
+    chunks = format_brief_as_chunks(weather, infra, one_thing, inbox, calendar_str, workspace, personal_habits, backlog, hub_status, plan_block)
 
     # Собрать полный бриф для сохранения в файл
     full_brief = "\n\n".join(chunks)
