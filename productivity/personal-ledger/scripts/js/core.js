@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const fmt=n=>Math.round(n).toLocaleString('ru-RU');
 const fmtK=n=>Math.abs(n)>=1e6?(n/1e6).toFixed(1)+'м':Math.abs(n)>=1e3?Math.round(n/1e3)+'к':Math.round(n);
-const EXCL=new Set(['Переводы','Возврат']);
+const EXCL=new Set(['Переводы','Возврат']); // 'Транзит' НЕ исключаем: приход Петра=доход, Корона=расход, дебет/кредит сходится (Василий 23.09)
 const SAL_CATS=['Зарплата (карта)','Зарплата (нал)'];
 const PAL=['#e9c46a','#2a9d8f','#e76f51','#4f7dc9','#f4a261','#a06cd5','#2ecc71','#ff7675','#d4a373','#8ab2f2'];
 const svg=(w,h,inner)=>`<svg viewBox="0 0 ${w} ${h}">${inner}</svg>`;

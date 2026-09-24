@@ -9,13 +9,17 @@ metadata:
 
 # Google Tracker Sync
 
-Двусторонняя синхронизация локального SQLite-трекера (`t`, `~/.hermes/tasks/tasks.db`) с Google Tasks + Google Calendar. Google = интерфейс телефона, SQLite = мозг (брифы, статистика, habit_log). Реализовано 21.09.2026, работает в проде: cron `gtsync-5min` каждые 5 минут.
+Двусторонняя синхронизация локального SQLite-трекера (`t`, `~/.hermes/tasks/tasks.db`) с Google Tasks + Google Calendar. Google = интерфейс телефона И читающий источник брифов, SQLite = мозг (статистика, habit_log, carry_over). Реализовано 21.09.2026, работает в проде: cron `gtsync-5min` каждые 5 минут.
+
+**Аудит брифов 23.09:** `morning-briefing` и `evening-reminder` переключены на `~/.hermes/scripts/brief_data.py` (читает TODAY/BACKLOG/HABITS из Google Tasks API, `--yesterday` для вчерашнего среза) — промпты, ссылавшиеся на `t status`/`task_display.py` по умершей tasks.db, вриили «нет задач» при живом телефоне. Интерактивные навыки (morning-ritual/evening-diary-brief) продолжают ПИСАТЬ через `t` (хуки пушат в Google) — менять не надо.
 
 ## Когда использовать
 
 - Пользователь жалуется на трекер / хочет «переехать на Google Tasks/Calendar»
 - Правка, отладка или расширение `~/.hermes/scripts/gtsync.py` / хуков в `t` / `tasks_api.py`
 - Вопросы «что синкается в телефон и как обратно»
+- Настройка cron-брифов (morning-briefing/evening-reminder) — они читают Google через `~/.hermes/scripts/brief_data.py` (создан 23.09: `--yesterday` для вчерашнего среза; PYTHONPATH обязателен)
+- ⚠️ Промпты брифов НЕ должны звать `t status`/`t list`/`task_display.py`/`brief_tasks.py` как источник — tasks.db для чтения «живых» задач мёртв, были галлюцинации «учёт стоит, задач нет» при полном телефоне (вердикт Василия 23.09)
 - Повторная постановка задачи «свой sync трекера с внешним сервисом»
 
 ## Архитектура (три слоя, все живые)
@@ -38,6 +42,16 @@ metadata:
 
 Формат due: `YYYY-MM-DDT00:00:00.000Z`. Маркеры в notes: `local:#<tid>` (задача), `habit:#<hid> date=<YYYY-MM-DD>` (карточка).
 
+## Procedure — удаление/замена привычки (рецепт проверен 23.09, ZenMoney→ledger)
+
+1. `t habit-rm <id>` → `t habit-add "Новое имя" --time HH:MM` (создаёт новый id).
+2. Снести СТАРЫЕ карточки из Google HABITS: их sync сам не удалит (он управляет только карточками существующих привычек). Прогнать список `tasklist=HABITS, showCompleted=True`, фильтровать `notes.startswith('habit:#<старый_id>')`, `svc.tasks().delete(...)` каждой. Вызов: `/usr/bin/python3` + `PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages` (экспорт PYTHONPATH триггерит approval-гейт «Interpreter hijack» — это нормально, не обходить).
+3. `bash gtsync.sh --no-calendar` — новая карточка залетит в Google.
+4. Зачистить state `~/.hermes/tasks/gtsync.json`: удалить ключи `habit_cards["<старый_id>:*"]` и `habits["<старый_id>"]` — иначе мусор растёт.
+5. Повторный `gtsync.sh --no-calendar` = 0 строк (идемпотентность).
+
+Закрытие ЗАДАЧИ из бэклога (не через чат): см. Pitfall «t cancel не берёт backlog» ниже.
+
 ## Procedure — отладка/расширение sync
 
 1. Прочитать `references/google-sync.md` — там карта данных и формат state.
@@ -47,8 +61,11 @@ metadata:
 5. Идемпотентность = критерий: повторный прогон ОБЯЗАН напечатать 0 строк.
 6. E2E обратных направлений — скрипты-симуляторы телефона (см. Verification).
 
-## Pitfalls (все — реальные баги 21.09.2026)
+## Pitfalls (все — реальные баги 21.09–23.09.2026)
 
+- **`invalid_scope` на calendar-ветке (23.09):** refresh-токен выдан со scope `calendar`; запрос с узким `calendar.events` Google отбивает RefreshError на каждом рефреше → события привычек молча НЕ создавались с 21.09 (tasks-ветка с 'tasks' работала, вводит в заблуждение). Лечение:scopes в `google_clients()` = `auth/calendar`. Проверка: `events().list` проходит, а `insert` с calendar.events — нет.
+
+- **`t cancel <id>` НЕ работает для задач со status='backlog'** (23.09: «Задача не найдена или уже закрыта» на id19). Лечение: SQL `UPDATE tasks SET status='cancelled' WHERE id=N` + `bash gtsync.sh --no-calendar` — sync увидит cancel и сам удалит gt-карточку (строка `✖ local cancelled -> delete gt ...` в выводе). НЕ удалять карточку руками из Google до этого шага — останется осиротевший google_id.
 - **Дубль-карточка при pull.** Шаг «новая задача с телефона» вызывает `t add`, а у него хук пуша → дубль в Google. Лечение: subprocess c env `GT_SYNC_OFF=1` (выключатель в `gt_cli`), затем patch карточки маркером `local:#id` и claim в state — НИКОГДА не создавать новую карточку для pull.
 - **Stale-снапшот ре-пушится.** Шаги 1–2 (cancel/done с телефона) мутируют БД через `t`, а шаг 4 итерит по снапшоту `local_tasks()` из начала прогона → закрытая задача снова летит в Google. Лечение: `handled` set id, шаг 4 их скипает.
 - **Фильтр по `created_at`** («активные с сентября») молча не синкает задачи, заведённые раньше, — сегодняшняя стирка не появлялась в телефоне. Фильтр: только `status IN ('pending','backlog')` + id из state.
@@ -83,4 +100,4 @@ bash gtsync.sh --no-calendar                     # финально: 0 стро�
 ## Related
 
 - `references/google-sync.md` — state-схема, REST-заметки, Calendar RRULE
-- `references/zenmoney-options.md` — готовые интеграции ZenMoney (MCP/API) — смежный класс «подключить внешний финансовый сервис к чату»; вопрос от 21.09 остался открытым (что именно «не работает» у пользователя)
+- `references/zenmoney-options.md` — готовые интеграции ZenMoney (MCP/API) — АРХИВ. ZenMoney похоронен окончательно 23.09 («zen money удаляем»): привычка и задача #19 удалены из трекера и Google; учёт финансов = personal-ledger (привычка «📊 Подбить расходы (ledger)» 18:30, id 18). Не возвращаться к ZenMoney без новой команды Василия.

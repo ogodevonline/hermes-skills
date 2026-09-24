@@ -12,13 +12,17 @@ function renderBudget(){
   const oPlan=OBLIG.reduce((s,c)=>s+planOf(m0,c),0), bPlan=planOf(m0,'Быт')||BYT.reduce((s,c)=>s+planOf(m0,c),0);
   const saveGoal=planFor(m0,'Накопления','savings')||0, hardCap=bPlan-saveGoal, saveLeft=bPlan-bSum;
   const okSave=saveLeft>=saveGoal;
+  // «Остальное» (Семья/Путешествия и пр.) — тоже реальный расход, входит в ИТОГО (было потеряно, чин. 23.09)
+  const rest={};rows.filter(t=>t.amount<0&&!EXCL.has(t.category)&&![...OBLIG,...BYT].includes(t.category)&&t.category)
+    .forEach(t=>rest[t.category]=(rest[t.category]||0)-t.amount);
+  const rSum=Object.values(rest).reduce((s,v)=>s+v,0);
   const PM=planMonth(m0), P=pace();
   $('bKpis').innerHTML=`
   <div class="kpi bcard"><b class="${P.end>PM.all?'neg':'pos'}">${fmtK(P.end)}</b><span>прогноз расхода за месяц · план ${fmtK(PM.all)}</span></div>
   <div class="kpi bcard"><b class="${okSave?'pos':'neg'}">${fmtK(saveLeft)}</b><span>остаток быта${saveGoal?` · цель ${fmtK(saveGoal)}+`:` · лимит ${fmtK(bPlan)}`}</span></div>
   <div class="kpi bcard"><b>${fmtK(bSum)}</b><span>быт · ${saveGoal?`потолок ${fmtK(hardCap)}`:`лимит ${fmtK(bPlan)}`}</span></div>
   <div class="kpi bcard"><b>${fmtK(oSum)}</b><span>обязательное · план ${fmtK(oPlan)}</span></div>
-  <div class="kpi bcard"><b class="neg">${fmtK(bSum+oSum)}</b><span>итого расход · ${bPeriod==='week'?'7 дней':bPeriod==='month'?m0.slice(5)+' мес':'вся история'}</span></div>`;
+  <div class="kpi bcard"><b class="neg">${fmtK(bSum+oSum+rSum)}</b><span>итого расход · ${bPeriod==='week'?'7 дней':bPeriod==='month'?m0.slice(5)+' мес':'вся история'}</span></div>`;
   const diff=P.end-PM.all;
   $('cPace').innerHTML=`<div class="big ${diff>0?'neg':'pos'}">${fmtK(P.end)} <span class="bigsub">прогноз на конец ${m0.slice(5)}.${m0.slice(2,4)}</span></div>
    <div class="hint">${diff>0?`перебор плана <b>на ${fmtK(diff)} ₽</b> — режь или сдвигай план`:`в рамках плана: запас ${fmtK(-diff)} ₽ до лимита`} · темп последних 7 дней ${fmtK(P.slope)} ₽/день · клик по категории — операции</div>`;
@@ -28,8 +32,6 @@ function renderBudget(){
    <div class="hint">${bSum<=bPlan?`быт ${fmt(bSum)} из ${fmt(bPlan)} — до конца месяца можно ещё ${fmt(Math.max(bPlan-bSum,0))} ₽`:`быт вышел за лимит ${fmt(bPlan)} на ${fmt(bSum-bPlan)} ₽`}</div>`;
   hbars($('cBytBars'),BYT.map(c=>({name:c,plan:planOf(m0,c),fact:byt[c]||0})).sort((a,b)=>b.fact-a.fact),openCat);
   hbars($('cOblig'),OBLIG.map(c=>({name:c,plan:planOf(m0,c),fact:oblig[c]||0})).sort((a,b)=>b.fact-a.fact),openCat);
-  const rest={};rows.filter(t=>t.amount<0&&!EXCL.has(t.category)&&![...OBLIG,...BYT].includes(t.category))
-    .forEach(t=>rest[t.category]=(rest[t.category]||0)-t.amount);
   hbars($('cRest'),Object.entries(rest).map(([c,v])=>({name:c,plan:planOf(m0,c),fact:v})).sort((a,b)=>b.fact-a.fact),openCat);
   pie($('cPie'),rows);
   monthStack($('cMonth'));
