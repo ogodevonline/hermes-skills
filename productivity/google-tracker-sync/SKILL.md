@@ -9,7 +9,7 @@ metadata:
 
 # Google Tracker Sync
 
-Двусторонняя синхронизация локального SQLite-трекера (`t`, `~/.hermes/tasks/tasks.db`) с Google Tasks + Google Calendar. Google = интерфейс телефона И читающий источник брифов, SQLite = мозг (статистика, habit_log, carry_over). Реализовано 21.09.2026, работает в проде: cron `gtsync-5min` каждые 5 минут.
+Двусторонняя синхронизация локального SQLite-трекера (`t`, `~/.hermes/tasks/tasks.db`) с Google Tasks + Google Calendar. **⚠️ С 24.09.2026 (вердикт Василия) ЕДИНСТВЕННЫЙ ЖИВОЙ ИНТЕРФЕЙС ЗАДАЧ — Google Tasks/Calendar (телефон). `t add/done/...`, создание задач в SQLite и чтение tasks.db брифами — ЗАПРЕЩЕНЫ; новые задачи — `tasks_api.py add` напрямую в TODAY. gtsync остаётся фоновым мостом (привычки/карточки/Календарь), но «SQLite = мозг» более не верно — мозг = Google, state gtsync.json — лишь мост.** Реализовано 21.09.2026, работает в проде: cron `gtsync-5min` каждые 5 минут.
 
 **Аудит брифов 23.09:** `morning-briefing` и `evening-reminder` переключены на `~/.hermes/scripts/brief_data.py` (читает TODAY/BACKLOG/HABITS из Google Tasks API, `--yesterday` для вчерашнего среза) — промпты, ссылавшиеся на `t status`/`task_display.py` по умершей tasks.db, вриили «нет задач» при живом телефоне. Интерактивные навыки (morning-ritual/evening-diary-brief) продолжают ПИСАТЬ через `t` (хуки пушат в Google) — менять не надо.
 
@@ -26,7 +26,7 @@ metadata:
 
 1. **`~/.hermes/scripts/gtsync.py`** — периодический sync-движок (cron каждые 5 мин, `no_agent`). Запуск **только через `gtsync.sh`** — он ставит `PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages`, без него googleapiclient не импортируется.
    - ⛅ TODAY / 📥 BACKLOG: статусы туда-сюда, приоритет H → префикс `❗`.
-   - 🌱 HABITS: дневные карточки привычек (одна на день, старые удаляются). Отметка на телефоне → `t habit-done`; `t habit-done` → закрытие карточки.
+   - 🌱 HABITS: дневные карточки привычек (одна на день, старые удаляются). Отметка на телефоне → `t habit-done`; `t habit-done` → закрытие карточки. С 26.09 карточка несёт время в заголовке (`🕗 08:00 · Имя`) — у Google Tasks due = только дата, время иначе не видно; `sync_habit_cards` патчит заголовок при расхождении (id-привязка через notes-маркер не трогается).
    - Привычки с `time` → **повторяющиеся события Google Календаря** (`RRULE:FREQ=WEEKLY;BYDAY=...` / `FREQ=DAILY`, popup-напоминание за 10 мин) — у Tasks API НЕТ recurrence, Календарь его закрывает.
    - State: `~/.hermes/tasks/gtsync.json` (`tasks[tid]={gt,sig}`, `habit_cards[hid:date]=gt`, `cal[hid]=event_id`, `cal_hash`). Лог действий: `~/.hermes/logs/gtsync.log`.
 2. **Хуки в самом `t`** (`~/.local/bin/t` → симлинк на скилл personal-task-tracker/scripts/t): `gt_cli()`, `gt_push()`, `gt_touch()` — `add/done/cancel/postpone` пушат мгновенно, `habit-done` закрывает сегодняшнюю карточку. Best-effort: тихо деградируют при недоступности Google.

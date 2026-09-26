@@ -8,7 +8,7 @@ requires: [personal-task-tracker]
 
 **Скрипт:** scripts/brief/__init__.py → generate_brief()
 
-**Сбор:** weather → infra → tasks (task_display) → news → gmail → calendar → habits
+**Сбор:** weather → infra → tasks (**Google Tasks через brief_data.py** — task_display/tasks.db мёртвы с 24.09.2026) → news → gmail → calendar → habits
 
 **Чанки:** ≤2500 chars. Длинные URL (>100) → домен. Английский → русский.
 
@@ -16,11 +16,10 @@ requires: [personal-task-tracker]
 
 **Vault-зависимости (пути, не менять без проверки):**
 - Дневники: `hermes-vault/Journal/` (директория на английском, НЕ `Дневник/`)
-- Все задачи: `t` CLI (`~/.local/bin/t`) или БД `~/.hermes/tasks/tasks.db`
-- Скрипт отображения задач: `python3 ~/.hermes/scripts/task_display.py`
+- ⚠️ Задачи: ТОЛЬКО Google Tasks (чтение — `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` с PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages; запись — `tasks_api.py`). `t` CLI, `tasks.db`, `task_display.py` — ДЕАКТИВИРОВАНЫ 24.09.2026 (вердикт Василия), не использовать
 
 **Режимы вызова:**
-- **Крон (утренний автоматический):** слать в Telegram без вопросов — это штатное поведение. **Ограничения:** `execute_code` заблокирован, `python3 -c` с SQLite-запросами уходит в `pending_approval`. Использовать прямые команды: `read_file` для дневников, `~/.local/bin/t` для задач, `TZ='Europe/Moscow' date` для даты.
+- **Крон (утренний автоматический):** слать в Telegram без вопросов — это штатное поведение. Данные задач — только brief_data.py (Google). Использовать прямые команды: `read_file` для дневников, `TZ='Europe/Moscow' date` для даты.
 - **Интерактивный (пользователь попросил вручную):** НЕ слать молча. Спросить: «Слать в Telegram или сюда/сюда текстом?» Дождаться ответа.
 
 Pitfalls:

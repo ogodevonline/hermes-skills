@@ -6,6 +6,8 @@ description: Показывает список задач из personal-task-tra
 
 # Tasks Summary
 
+> **⚰️ ДЕАКТИВИРОВАН 25.09.2026:** читает мёртвую `tasks.db`. Актуальные задачи — в Google: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages).
+
 Выводит активные задачи из personal-task-tracker (SQLite).
 
 ## Запуск

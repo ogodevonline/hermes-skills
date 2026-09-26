@@ -7,6 +7,8 @@ requires: []
 
 # Personal Task Tracker
 
+> **⚰️ ДЕАКТИВИРОВАН 24–25.09.2026 (вердикт Василия): ВСЁ в Google Tasks.** `t add/done/cancel/postpone/list`, `task_display.py`, чтение `tasks.db` — НЕ ИСПОЛЬЗОВАТЬ. Чтение задач/привычек: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages). Запись: `/usr/bin/python3 ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py` (add/complete/patch/delete; TODAY `VDhuNDh2enVHY1I3TlBtUQ`, BACKLOG `MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow`, HABITS `Y0c3NGFIRThRTnlWNFRpMg`). Ниже — историческая документация CLI, не инструкция к действию.
+
 ## Что это
 SQLite-трекер задач и привычек. Всё в одной БД `~/.hermes/tasks/tasks.db`.
 

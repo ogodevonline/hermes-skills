@@ -46,7 +46,7 @@ requires: [personal-task-tracker, vault-structure]
    - 21:15 Цинк + Магний (дом)
    - 21:30 отбой (дом)
 2. **Привычки** — `t habits` (время в имени привычки)
-3. **Задачи** — `t list` / `~/.hermes/scripts/task_display.py` (⏰время в имени задачи)
+3. **Задачи** — `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (Google Tasks; `t list`/`task_display.py`/tasks.db мёртвы с 24.09.2026) (⏰время в имени задачи)
 4. **Файл плана** — `~/hermes-vault/Journal/YYYY-MM-DD.md`, секция `## 🗓 План дня`
 
 ## Процедура /plan
