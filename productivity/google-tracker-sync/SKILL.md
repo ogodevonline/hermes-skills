@@ -31,6 +31,7 @@ metadata:
    - State: `~/.hermes/tasks/gtsync.json` (`tasks[tid]={gt,sig}`, `habit_cards[hid:date]=gt`, `cal[hid]=event_id`, `cal_hash`). Лог действий: `~/.hermes/logs/gtsync.log`.
 2. **Хуки в самом `t`** (`~/.local/bin/t` → симлинк на скилл personal-task-tracker/scripts/t): `gt_cli()`, `gt_push()`, `gt_touch()` — `add/done/cancel/postpone` пушат мгновенно, `habit-done` закрывает сегодняшнюю карточку. Best-effort: тихо деградируют при недоступности Google.
 3. **`tasks_api.py`** (google-workspace skill) — расширен: субкоманда `patch` (title/notes/due), вывод `tasks` печатает `notes`.
+   ⚠️ `tasks_api.py tasks/add/patch` НЕ знают про Календарь; календарные события — через `google_api.py calendar` (см. Procedure «напомни мне»). `tasks -h` показывает позиционный `list_id`, а не `--list`.
 
 ## Ключевые константы (аккаунт svaaugust)
 
@@ -41,6 +42,39 @@ metadata:
 | 🌱 HABITS | `Y0c3NGFIRThRTnlWNFRpMg` |
 
 Формат due: `YYYY-MM-DDT00:00:00.000Z`. Маркеры в notes: `local:#<tid>` (задача), `habit:#<hid> date=<YYYY-MM-DD>` (карточка).
+
+## Procedure — «напомни мне» = ДВА места (вердикт Василия 26.09)
+
+На любое «напомни / поставь напоминалку» создаётся ДВЕ вещи, не одна:
+
+1. **Cron-задача Hermes** (`cronjob` tool, `deliver: telegram`) — сообщение в чат в нужное время.
+2. **Событие Google Календаря** аккаунта `svaaugust` —popup-напоминания на телефоне. То же касается новых задач и привычек: они должны попадать в Календарь, а не только в Tasks/cron.
+
+Создание события Календаря (проверено 26.09, работает):
+
+```python
+# /tmp/cal_reminder.py — terminal-хардлайн не любит heredoc с google-импортами,
+# поэтому пишем скрипт файлом и зовём ОДНОЙ командой:
+import sys
+sys.path.insert(0, "/home/hermes/.hermes/skills/productivity/google-workspace/scripts")
+import google_api
+from google_api import build_service
+body = {
+  "summary": "❗ <что сделать>", "description": "<контекст, данные>",
+  "start": {"dateTime": "2026-09-28T10:00:00+03:00", "timeZone": "Europe/Moscow"},
+  "end":   {"dateTime": "2026-09-28T10:30:00+03:00", "timeZone": "Europe/Moscow"},
+  "reminders": {"useDefault": False, "overrides": [
+      {"method": "popup", "minutes": 10}, {"method": "popup", "minutes": 0}]},
+}
+print(build_service("calendar", "v3").events().insert(calendarId="primary", body=body).execute()["htmlLink"])
+```
+
+```
+PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages /usr/bin/python3 /tmp/cal_reminder.py
+```
+
+⚠️ Часовой пояс — MSK (UTC+3) в `dateTime` с офсетом `+03:00`; сервер в UTC, «понедельник 10:00» без офсета прилетит в другое время. Дата/день недели всегда сверять `TZ=Europe/Moscow date`.
+Альтернатива CLI: `google_api.py calendar create --account svaaugust --summary ... --start ... --end ...` (там же есть `calendar list/delete`).
 
 ## Procedure — удаление/замена привычки (рецепт проверен 23.09, ZenMoney→ledger)
 
