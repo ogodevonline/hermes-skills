@@ -17,9 +17,10 @@ metadata:
 (ветки были устаревшими — `web/dist`, `web/src/...` больше НЕ существуют; git status показывает `web/`,
 `web-public/` как мусор от старого pull — игнорировать, НЕ трекать). Прод — **фикс-домен
 `https://24ghost.online` через контейнер caddy** (не cloudflared-туннель): `WEBAPP_URL=https://24ghost.online/web/`,
-`SITE_BASE_URL=https://24ghost.online` в .env. Ботов в поллинге 6 (с 19.09): 3 client + 3 worker — демо-пара
+`SITE_BASE_URL=https://24ghost.online` в .env. Ботов в поллинге 8 (с 27.09): 4 client + 4 worker — демо-пара
 (@lead_worker_demo_bot/@lead_client_demo_bot) + платформа-пара (@lead_platform_worker_bot/@lead_platform_client_bot)
-+ Mamin-пара (@mamin_worker_bot/@main_client_bot — имя клиента именно `main`, не `mamin`); проверять по `docker logs lead-platform-bots-1 | grep 'Run polling'`.
++ Mamin-пара (@mamin_worker_bot/@main_client_bot — имя клиента именно `main`, не `mamin`) + Lima-пара (@lima_braids_bot/@lima_braids_notify_bot); проверять по `docker logs lead-platform-bots-1 | grep 'Run polling'`.
+Передача бизнеса владельцу (transfer-owner #306, BotFather-трансфер): `references/owner-handover.md`.
 Миграции — **alembic** (issue #108): `src/core/db_migrate.py` — CLEAN→`upgrade head`, UNTRACKED→create_all+ad-hoc+stamp,
 TRACKED→`upgrade head`; пред-чек сборки: `cd admin-panel && npx tsc -b` И `cd landing && npx tsc -b` (node на хосте есть,
 `npm ci` в обеих директориях один раз;vitest 4 ловит TS6133/TS2493 так же, как Dockerfile-сборка).
@@ -43,6 +44,9 @@ single-tenant, свои 2 бота). `config/` примонтирован в app
 - «поднять проект», «проверить lead-platform», «продолжить по шагам проверки user stories»
 - пересобрать/пересидить тенант, перезапустить ботов, сменить туннель
 - проверить воронку US-00a или user stories по критериям приёмки
+- **передать бизнес (боты+тенант) человеку** — смена владельца в БД,
+  BotFather Transfer Ownership, transfer-owner API/UI (#305/#306):
+  `references/bot-handover-transfer.md`
 
 ⚠️ **12.09 питфолл (Василий матом):** «ОПУСТИ лид-платформу» = ТОЛЬКО `docker compose down`
 (стопить прод). НЕ pull, НЕ build, НЕ деплой, НЕ чистить диск «перед сборкой» — это не
@@ -123,7 +127,7 @@ single-tenant, свои 2 бота). `config/` примонтирован в app
 ⚠️ 07.09: машина Hermes = vdska (hostname vdska); `scripts/remote*.sh` (ssh-обёртки) НЕ работают — хост `hermes` не резолвится. Все команды локально напрямую.
 ⚠️ Пилот переименован: `rashid-dental` → **`city-dental`**; демо-вертикали (demo-barber/salon/massage/fitness) — `scripts/seed_verticals.py`.
 ⚠️ Сброс БД одной командой: `~/.hermes/scripts/dk.sh bash -c "cd ~/projects/lead-platform && bash scripts/db_reset.sh --yes"` (DROP SCHEMA → seed_platform → seed_pilot → up -d app bots). Флаг **`--demo` = канон-состояние 24ghost** (platform + витрина «Косы» slug=demo, своя база lp_demo_demo, боты из config/tenants/demo.toml). Затем заполнение CRM: см. «Демо-CRM» ниже.
-⚠️ **14.09 поправка Василия («А что ты делаешь, боюсь спросить? Нужно было сбросить и перезапустить все»):** по явной команде «снести всё / переставить» — запускать штатный скрипт СРАЗУ. Единственное предварение: если в текущих базах есть уникальные секреты (токены ботов клиента в сирота-базе `tenants`), выписать их в файл ОДНИМ быстрым запросом — и сразу вайп. Не разворачивать чтение кода/реестра ДО команды: диагностику — параллельно или после. При длинной диагностике по свежей жалобе — вердикт каждые 2–3 tool-вызова (усиление правила 09.09).
+⚠️ **14.09 поправка Василия («А что ты делаешь, боюсь спросить? Нужно было сбросить и перезапустить все»):** по явной команде «снести всё / переставить» — запускать штатный скрипт СРАЗУ. Единственное предварение: если в текущих базах есть уникальные секреты (токены ботов клиента в сирота-базе `tenants`), выписать их в файл ОДНИМ быстрым запросом — и сразу вайп. Не разворачивать чтение кода/реестра ДО команды: диагностику — параллельно или после. При длинной диагностике по свежей жалобе — вердикт каждые 2–3 tool-вызова (усиление правила 09.09). То же при чтении кода под новую фичу: через 3–4 хода — короткий вердикт «что нашёл, что делаю», дальше реализация без пауз (27.09: два «ну и?» подряд во время разведки кода под фичу).
 ⚠️ Новые скрипты НЕ видны в работающем контейнере (код в образе, volumes нет): `dk.sh docker cp scripts/<x>.py lead-platform-app-1:/app/scripts/` + `dk.sh docker exec lead-platform-app-1 python scripts/<x>.py`, либо пересборка образа.
 ⚠️ Kanban-гигиена: после мержа задачи удалять её worktree и влитые ветки (`git branch --merged main | grep lead-platform/ | xargs git branch -d`); 07.09 накопилось 33 — Василий недоволен.
 0. **Проверка диска ПЕРЕД build (07.09, привычка Василия «сначала место почистить»):**

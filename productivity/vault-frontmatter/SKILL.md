@@ -90,6 +90,8 @@ Vault frontmatter rules: см. /home/hermes/hermes-vault/AGENTS.md. Загруз
 
 ## Ошибки и fallback
 
+- **Питфолл (27.09, weekly-finance cron):** pre-commit хук = `gitmark.py lint --strict` по ВСЕМУ vault — три Journal-файла без frontmatter (созданные ритуалами) блокировали коммит моего дайджеста. Фикс: `--mode=add-missing` по каждому ERR-файлу (контент не трогает), затем `git commit -m ... -- <мой/путь>` (pathspec = только мой файл, чужие staged не утаскивать). `--no-verify` НЕ использовать.
+
 - Если скрипт gotham-ensure-frontmatter.py не найден → добавь frontmatter вручную по шаблону выше
 - Если не можешь угадать node_type → ставь `note` (безопасный дефолт)
 - Если validate ERROR → НЕ блокируй задачу, исправь и продолжай
