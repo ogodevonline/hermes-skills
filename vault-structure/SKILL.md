@@ -129,7 +129,7 @@ Self-improver и Skill-improver сохраняют планы сюда.
 
 | Назначение | Путь | node_type |
 |---|---|---|
-| Онтология, spec Gotham | `System/Gotham/` | system-note |
+| Онтология, spec Gotham (архив, только чтение) | `Archive/Agents/Gotham/` | system-note |
 | AGENTS.md (правила frontmatter) | `AGENTS.md` (корень vault) | system-note |
 | Home.md (стартовая) | `Home.md` (корень vault) | index |
 
@@ -181,9 +181,9 @@ Self-improver и Skill-improver сохраняют планы сюда.
 ### 1. Vault .md файлы (самое важное!)
 ```bash
 cd ~/hermes-vault
-grep -rln 'СтарыйПуть' --include="*.md" | grep -v ".obsidian/" | grep -v "System/Gotham/report-"
+grep -rln 'СтарыйПуть' --include="*.md" | grep -v ".obsidian/" | grep -v "Archive/Agents/Gotham/report-"
 ```
-Ищи в: `System/Docs/` (документация), `Areas/` (профили, викилинки), `Projects/` (README), `Journal/` (старые дневники с битыми ссылками), `System/audits/`, `System/AgentsData/`
+Ищи в: `System/Docs/` (документация), `Areas/` (профили, викилинки), `Projects/` (README), `Journal/` (старые дневники с битыми ссылками), `System/audits/`, `Archive/Agents/AgentsData/`
 
 ### 2. Навыки и скрипты
 ```bash
@@ -193,9 +193,9 @@ grep -rn 'СтарыйПуть' ~/.hermes/scripts/ --include='*.py'
 Проверь: SKILL.md (включая pitfall'ы, примеры, changelog), .legacy/SKILL.md, references/
 
 ### 3. Обнови исторические файлы
-- **Agent memories** (System/AgentsData/Worker/) — добавь `⚠️ УСТАРЕЛО` notice сверху (не меняй историю!)
+- **Agent memories** (Archive/Agents/AgentsData/Worker/) — добавь `⚠️ УСТАРЕЛО` notice сверху (не меняй историю!)
 - **Audits** (System/audits/) — добавь outdated notice
-- **System/Gotham/report-\*.md** — НЕ трогать (исторические)
+- **Archive/Agents/Gotham/report-\*.md** — НЕ трогать (исторические)
 
 ### 4. Закрепи в памяти
 Обнови memory: `memory(action='replace', target='memory', old_text='...', content='All vault paths are English: ...')`
@@ -236,11 +236,11 @@ grep -rn 'СтарыйПуть' ~/hermes-vault/ ~/.hermes/skills/ --include="*.m
 ```bash
 cd ~/hermes-vault
 # Папки с русскими символами
-find . -maxdepth 4 -type d -name "*[а-яА-Я]*" | grep -v ".obsidian" | grep -v "System/Gotham"
+find . -maxdepth 4 -type d -name "*[а-яА-Я]*" | grep -v ".obsidian" | grep -v "Archive/Agents/Gotham"
 # Файлы с русскими символами
-find . -maxdepth 4 -type f -name "*[а-яА-Я]*" | grep -v ".obsidian" | grep -v "System/Gotham/report-"
+find . -maxdepth 4 -type f -name "*[а-яА-Я]*" | grep -v ".obsidian" | grep -v "Archive/Agents/Gotham/report-"
 # Wikilinks с русскими путями
-grep -rn "\[\[[а-яА-Я].*/" --include="*.md" | grep -v ".obsidian/" | grep -v "System/Gotham/report-"
+grep -rn "\[\[[а-яА-Я].*/" --include="*.md" | grep -v ".obsidian/" | grep -v "Archive/Agents/Gotham/report-"
 ```
 
 Это находит даже то, что не входит в список миграции (группы/, люди/, Узбекистан-2026/, План.md, архитектура-агентов).
