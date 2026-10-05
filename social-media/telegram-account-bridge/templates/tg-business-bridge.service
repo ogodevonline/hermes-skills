@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram Business Bridge (Secretary Mode) — чтение личек и ответы от имени владельца
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hermes/.hermes/tg-userbot
+ExecStart=/usr/bin/python3 /home/hermes/.hermes/tg-userbot/business_bridge.py poll
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/hermes/.hermes/tg-userbot/poll.log
+StandardError=append:/home/hermes/.hermes/tg-userbot/poll.log
+
+[Install]
+WantedBy=default.target
