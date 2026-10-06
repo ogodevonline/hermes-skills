@@ -174,6 +174,13 @@ Git hook (`pre-commit`) в .git/hooks/ KB:
 - `System/Gotham/03-Roadmap.md` — фазы внедрения с Kanban-задачами
 - `AGENTS.md` (корень vault) — инструкция для агентов
 
+### Коммит и пуш в git-backed KB (когда git мешает)
+
+- **Pre-commit хук линтит ВЕСЬ KB, а не только коммитимые файлы.** Чужие заметки без frontmatter (их создали ритуалы, cron-задачи или сам пользователь из Obsidian) блокируют твой коммит. Порядок: `ensure-frontmatter --mode=add-missing` по каждому ERR-файлу из вывода хука (их контент скрипт не переписывает) → `git commit -m "..." -- <только свои пути>`, чтобы не утащить чужие staged-файлы. `--no-verify` не использовать — это единственный слой, ловящий правки мимо агента.
+- **`git push` отвечает `Invalid username or token` при живом gh-аккаунте** — в окружении лежит протухший `GH_TOKEN`, и он перебивает `gh auth git-credential` (config: `credential.helper = !gh auth git-credential`). Пушить как `env -u GH_TOKEN git push`; перелогин и смена remote не нужны.
+- **Push отклонён non-fast-forward, а в индексе висят чужие staged-файлы** — `git pull --rebase` в таком состоянии отказывается («Your index contains uncommitted changes»). Делать `env -u GH_TOKEN git pull --rebase --autostash` (autostash вернёт staged-файлы после ребейза), затем `git push`.
+- **Сверять, что коммит реально ушёл**: `git status -sb` без строки `ahead` = синхронизировано. KB читают с нескольких устройств, локальный коммит для них не существует.
+
 ## Search indexing (FTS5)
 
 A pure-stdlib Python CLI (like GitMark's `gitmark.py` at ~760 lines) builds a SQLite FTS5 index:

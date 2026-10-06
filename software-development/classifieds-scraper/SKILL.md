@@ -156,7 +156,21 @@ Returns clean markdown text with all visible data. Produces output like:
 
 This text is directly parsable — no CSS selectors needed.
 
-### 3. NEVER write test scripts for detail pages
+### 3. Jina Reader — для страниц СПИСКА (где web-tools пасует)
+
+`web-tools extract` (в Hermes встроенный `web_extract` запрещён правилом «поиск и экстракт только через web-tools CLI») даёт чистые поля на КАРТОЧКЕ объявления — комнаты, площади, цена, описание. Но на странице СПИСКА OLX он возвращает CSS-кашу (`-webkit-text-decoration:none`, `.css-1q7zkos{...}`), цену и площадь оттуда не вытащить.
+
+Для списка брать Jina Reader:
+
+```bash
+curl -s --max-time 40 "https://r.jina.ai/<LIST_URL>"
+```
+
+Отдаёт markdown: заголовок, ссылка, город, площадь по каждому объявлению.
+
+⚠️ Jina гонит URL через свой сервер: для публичных листингов ок, для приватных страниц и локальных стендов не применять. На карточке объявления Jina — наоборот, шумная (тащит все ссылки на фотографии); там остаются trafilatura / web-tools.
+
+### 4. NEVER write test scripts for detail pages
 
 When the user says "проверь на одном", respond by calling `web_extract` or `trafilatura`
 on the URL, not by writing a new Python script. Writing a test script introduces:

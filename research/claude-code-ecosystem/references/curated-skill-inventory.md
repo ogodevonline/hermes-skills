@@ -45,6 +45,31 @@
 - claudedirectory.org, mcpmarket.com, skills.rest, skillsllm.com, gradually.ai (47 маркетплейсов), awesomeskill.ai
 - buildwithclaude.com/marketplaces — каталог маркетплейсов
 
+## Парсинг / скрапинг
+
+| Скилл | Что делает | Статус |
+|---|---|---|
+| Panniantong/Agent-Reach (github.com/Panniantong/agent-reach) | CLI-роутер, НЕ обёртка: подбирает, ставит и диагностирует бэкенд под 16 площадок. Чтение делает сам агент обычными CLI: Jina Reader (веб), yt-dlp (YouTube), gh (GitHub), feedparser (RSS), Exa через mcporter (поиск), OpenCLI / twitter-cli / rdt-cli / xhs (соцсети за логином). У каждой площадки список бэкендов по приоритету, `agent-reach doctor` реально щупает каждый и печатает активный | ✅ установлен и проверен вручную |
+
+Живых каналов на чистой машине — 4/16: Jina Reader, RSS, V2EX, поиск B站. Reddit / Twitter / Facebook / Instagram / 小红书 / LinkedIn / Boss требуют логина или cookie (их README сам советует отдавать левый аккаунт: за API-обходы банят). Поисковый канал (Exa) не поднимается без mcporter.
+
+Установка и проверка — одноразовый venv, система не затрагивается. `--system` без явного разрешения Василия не запускать: он ставит системные пакеты и пишет файлы в чужие skills-каталоги.
+
+```bash
+cd ~/.hermes/cache/scratch && python3 -m venv ar-venv
+./ar-venv/bin/pip install "https://github.com/Panniantong/agent-reach/archive/main.zip"
+./ar-venv/bin/agent-reach doctor          # статус каналов + активный бэкенд на площадку
+./ar-venv/bin/agent-reach check-update    # одна проверка версии
+```
+
+Скретч чистится после 24 ч простоя — для постоянного использования venv вне скретча (`uv tool install`) или `~/.agent-reach-venv`.
+
+Скилл, который проект везёт с собой, лежит в `site-packages/agent_reach/skill/`: SKILL.md (кит.), SKILL_en.md (англ.), references/ (только кит.). `agent-reach install --system` регистрирует его в skills-каталоги Claude Code / OpenClaw / opencode; Hermes в списке нет — копировать в `~/.hermes/skills/` вручную.
+
+Сторонние переупаковки того же CLI: `terrylica/cc-skills` → plugins/agent-reach (роутер на 17 платформ), `Elixir-Piloting/agent-reach-skill` (для opencode).
+
+Вердикт для Василия: НЕ замена web-tools (поиск у Agent Reach сам не работает без mcporter), а дополнение — и только если понадобятся Reddit или Facebook/Instagram в объёме. Экстрактор Jina Reader разобран в навыке classifieds-scraper.
+
 ## Безопасность
 
 Snyk ToxicSkills (блог snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/):

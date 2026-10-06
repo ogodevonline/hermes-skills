@@ -112,6 +112,9 @@ description: "Единый справочник по структуре Obsidian
 | Карточка | `Areas/Profile/index.md` | profile |
 | Tech-stack | `Areas/Profile/tech-stack.md` | profile |
 | Опыт (14 проектов) | `Areas/Profile/experience/_index.md` | profile |
+| Сервисы, подписки, доступы | `Areas/Profile/services.md` | profile |
+
+**`services.md` — единый файл на все платные сервисы и доступы** (прокси, хостинг, домены, ИИ-подписки). Секция на сервис: провайдер, ссылка на личный кабинет, зачем нужен, тариф/объём/цена, оплачено до, креды, команды проверки. «Надо куда-то записать, что я использую X» = сюда, не новая заметка на каждый сервис. Ссылку добавлять в `Areas/Profile/index.md` (секция «Структура»).
 
 ---
 
@@ -151,6 +154,20 @@ Self-improver и Skill-improver сохраняют планы сюда.
 - **obsidian_save.py** — `python3 ~/.hermes/scripts/obsidian_save.py <Agent> -` — сохраняет в `agents-data/<Agent>/`, git add+commit+push
 - **obsidian_utils** — `from obsidian_utils import write_section, commit_all, get_vault_path` — для write_section (дневники)
 - **vault-frontmatter skill** — загрузить перед любым write_file в vault (правила frontmatter + node_type table + валидация)
+
+### Коммит и push после ручной записи в vault
+
+```bash
+cd ~/hermes-vault
+git add <мои файлы>
+git commit -m "..." -- <мои файлы>   # pathspec обязателен: чужие staged-файлы не утаскивать
+env -u GH_TOKEN git push
+```
+
+- **`git push` → `Invalid username or token / Password authentication is not supported`** — в окружении висит невалидный `GH_TOKEN`, и он приоритетнее рабочего `gh`-аккаунта. Пушить через `env -u GH_TOKEN git push`: helper `gh auth git-credential` подставит живой аккаунт. Дефолтный `git push` без этой очистки падает всегда, пока токен в окружении невалиден.
+- **`git push` → `Updates were rejected ... (fetch first)`** — remote ушёл вперёд. `git pull --rebase` откажется работать, пока в индексе висят чужие staged-файлы (в vault их обычно висит пачка): `env -u GH_TOKEN git pull --rebase --autostash`, затем push. Локальный коммит при этом не теряется — работу заново не делать.
+- **pre-commit хук линтит весь vault**, а не только твои файлы — чужие заметки без frontmatter блокируют коммит; порядок разбора в навыке `vault-frontmatter`.
+- Результат проверять `git status -sb`: `## main...origin/main` без `ahead N`.
 
 ---
 

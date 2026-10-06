@@ -1,0 +1,44 @@
+<!-- Bot / app avatar template. Copy, then change: background stops, accent gradient,
+     monogram text, label text. Keep every element inside a centred circle of radius 0.45*size
+     (safe for circular avatar crops). Rendered at 1024x1024 via scripts/render-svg-png.sh. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#26327F"/>
+      <stop offset="1" stop-color="#101746"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E6ECFF"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3EE0F5"/>
+      <stop offset="1" stop-color="#12A8D6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="440" r="330" fill="#4B63D8" opacity="0.30"/>
+
+  <!-- chat bubble with tail -->
+  <path d="M328 196 H696 A96 96 0 0 1 792 292 V624 A96 96 0 0 1 696 720 H430 L316 806 V720 H328 A96 96 0 0 1 232 624 V292 A96 96 0 0 1 328 196 Z"
+        fill="url(#bubble)"/>
+
+  <!-- monogram; dominant-baseline keeps it optically centred -->
+  <text x="512" y="452" text-anchor="middle" dominant-baseline="central"
+        font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold"
+        font-size="252" fill="#16205E" letter-spacing="-4">LP</text>
+
+  <!-- accent check badge overlapping the bubble corner -->
+  <circle cx="700" cy="700" r="120" fill="url(#acc)"/>
+  <path d="M644 702 L686 744 L760 656" fill="none" stroke="#FFFFFF" stroke-width="36"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- optional DEMO/staging label; delete for the production mark.
+       The alternative variant reuses this geometry with a darker background and a
+       contrasting accent colour instead of a different shape. -->
+  <rect x="292" y="800" width="440" height="128" rx="64" fill="url(#acc)"/>
+  <text x="512" y="866" text-anchor="middle" dominant-baseline="central"
+        font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold"
+        font-size="76" fill="#17171C" letter-spacing="10">DEMO</text>
+</svg>
