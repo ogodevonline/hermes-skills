@@ -7,13 +7,13 @@ requires: [google-workspace, obsidian]
 
 # Morning Ritual v5 — Живой диалог, источник = Google Tasks
 
-**⚠️ ЭПОХА 24.09.2026 (вердикт Василия): ВСЁ в Google Tasks. `t` CLI, `tasks.db`, `task_display.py` — МЁТВЫ, не использовать НИГДЕ. Чтение: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (с PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages). Запись: `/usr/bin/python3 ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py` (add/complete/patch/delete; списки: TODAY `VDhuNDh2enVHY1I3TlBtUQ`, BACKLOG `MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow`, HABITS `Y0c3NGFIRThRTnlWNFRpMg`).**
+**⚠️ ЭПОХА 24.09.2026 (вердикт Василия): ВСЁ в Google Tasks — единственный источник истины (`task_display.py` читает Google TODAY/BACKLOG). Чтение: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (с PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages). Запись: `/usr/bin/python3 ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py` (add/complete/patch/delete; списки: TODAY `VDhuNDh2enVHY1I3TlBtUQ`, BACKLOG `MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow`, HABITS `Y0c3NGFIRThRTnlWNFRpMg`).**
 
 **Назначение (по Василию, 26.08.2026):** утренний бриф — это **небольшой живой диалог**: проверяем задачи на день, вносим правки. Я — ассистент: помогаю выставить приоритеты, не упустить важное, учитываю **локации и время задач**, веду **график Василия**.
 
 **ЗАПРЕЩЕНО:**
 - ❌ Никаких скриптов/выводов скриптов в диалоге (brief_data/tasks_api сырым — не показывать). Данные читаю тихо сам.
-- ❌ `t add`/`t done`/`t list`/`t postpone`/tasks.db — ЗАПРЕЩЕНЫ (24.09: всё в Google).
+- ❌ Локальный трекер и его CLI — ЗАПРЕЩЕНЫ (24.09: всё в Google Tasks, запись через `tasks_api.py`).
 - ❌ Никаких анкетных вопросов (энергия, благодарность, фокус-сфера, настроение, тайминг) — Василий их отверг.
 
 Длится ~30-60 сек. Команда `/morning`.
@@ -80,7 +80,7 @@ requires: [google-workspace, obsidian]
 12. **Повторный вызов** — «Хочешь обновить? (да/нет)».
 
 ## История
-- v5.0 (25.09.2026): источник и запись — ТОЛЬКО Google Tasks (brief_data.py + tasks_api.py); `t`/tasks.db вычеркнуты из всех шагов (вердикт Василия 24.09).
+- v5.0 (25.09.2026): источник и запись — ТОЛЬКО Google Tasks (brief_data.py + tasks_api.py); старый локальный трекер вычеркнут из всех шагов (вердикт Василия 24.09).
 - v4.0 (26.08.2026): полная смена формата — живой диалог-ассистент, никаких скриптов в диалоге, учёт локаций/времени/графика, приоритеты предлагаю я.
 - v3.0 (26.08.2026): убрана анкета (энергия/благодарность/фокус/настроение).
 - v2.6 (28.05.2026): шаг 3А/3Б/3В, без «ранжируй A/B/C».

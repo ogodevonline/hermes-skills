@@ -17,7 +17,7 @@ tags: [gotham, vault, frontmatter, compliance]
 Перед любым write_file в vault:
 
 ```bash
-cat /home/hermes/hermes-vault/AGENTS.md
+cat /home/hermes/hermes-vault/System/Docs/vault-rules.md
 ```
 
 Это единый источник правил: 19 node_type, 5 статусов, обязательные поля.
@@ -85,7 +85,7 @@ python3 /home/hermes/scripts/gotham-ensure-frontmatter.py --path <file> --mode=a
 
 Передай в context строку:
 ```
-Vault frontmatter rules: см. /home/hermes/hermes-vault/AGENTS.md. Загрузи навык vault-frontmatter.
+Vault frontmatter rules: см. /home/hermes/hermes-vault/System/Docs/vault-rules.md. Загрузи навык vault-frontmatter.
 ```
 
 ## Ошибки и fallback

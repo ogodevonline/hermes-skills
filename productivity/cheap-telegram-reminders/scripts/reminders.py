@@ -1,18 +1,38 @@
 #!/usr/bin/env python3
-"""Universal Reminders — читает задачи, привычки и периодику из SQLite.
-Запускается cron'ом каждый час (08:00-00:00 МСК). Отправляет напоминания в Telegram."""
+"""Universal Reminders — задачи из Google Tasks, привычки и периодика из SQLite.
+Запускается cron'ом каждый час (08:00-00:00 МСК). Отправляет напоминания в Telegram.
+
+Источник ЗАДАЧ с 06.10.2026 — Google Tasks (список ⛅ TODAY) через
+skills/productivity/google-workspace/scripts/tasks_api.py (OAuth уже настроен).
+Привычки — из Google Tasks (🌱 HABITS). Локальной базы нет.
+Крон Hermes «reminders-hourly» зовёт `reminders.py --stdout`.
+
+Режим без отправки: `python3 reminders.py --dry-run` — печатает открытые задачи
+из Google и то, что было бы отправлено, но Telegram не трогает.
+"""
 
 import os
 os.environ['TZ'] = 'Europe/Moscow'
 import time
 time.tzset()
-import sqlite3
+import re
+import sys
 import requests
 from datetime import datetime
 from pathlib import Path
 
 HERMES_HOME = os.path.expanduser("~/.hermes")
-DB = Path(HERMES_HOME) / "tasks" / "tasks.db"
+
+# Google Tasks: список ⛅ TODAY (источник истины для задач)
+TASKS_SCRIPTS = Path(HERMES_HOME) / "skills" / "productivity" / "google-workspace" / "scripts"
+TODAY_LIST_ID = "VDhuNDh2enVHY1I3TlBtUQ"  # ⛅ TODAY
+# Время напоминания у задачи Google Tasks задаётся в notes строкой reminder:HH:MM
+REMINDER_RE = re.compile(r"reminder[:=]\s*(\d{1,2}:\d{2})", re.IGNORECASE)
+
+if str(TASKS_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(TASKS_SCRIPTS))
+from tasks_api import get_service  # noqa: E402  (свой OAuth не пишем)
+
 
 def getenv(key, default=None):
     env_file = Path(HERMES_HOME) / ".env"
@@ -23,6 +43,7 @@ def getenv(key, default=None):
                 if line.startswith(f"{key}="):
                     return line.split("=", 1)[1].strip()
     return default
+
 
 def send_telegram(text):
     token = getenv("TELEGRAM_BOT_TOKEN")
@@ -41,111 +62,123 @@ def send_telegram(text):
         print(f"❌ Ошибка отправки: {e}")
     return False
 
-def get_db():
-    conn = sqlite3.connect(str(DB))
-    conn.row_factory = sqlite3.Row
-    return conn
 
-def is_today_right_day(weekdays: str) -> bool:
-    """Проверка дня недели. weekdays: 'Пн,Ср,Пт' или пусто (каждый день)."""
-    if not weekdays:
-        return True
-    day_map = {
-        "пн": 0, "вт": 1, "ср": 2, "чт": 3,
-        "пт": 4, "сб": 5, "вс": 6,
-    }
-    today_weekday = datetime.now().weekday()
-    for d in weekdays.split(","):
-        d = d.strip().lower()[:3]
-        if d in day_map and day_map[d] == today_weekday:
-            return True
-    return False
+# ─── ЗАДАЧИ: Google Tasks ────────────────────────────────────────────────
 
-def check_tasks():
-    """Задачи с time-based reminder на текущее время."""
+def fetch_open_tasks(service, tasklist):
+    """Все открытые (needsAction) задачи списка, с пагинацией."""
+    items, token = [], None
+    while True:
+        kw = {"tasklist": tasklist, "showCompleted": False, "maxResults": 100}
+        if token:
+            kw["pageToken"] = token
+        res = service.tasks().list(**kw).execute()
+        items += res.get("items", [])
+        token = res.get("nextPageToken")
+        if not token:
+            return items
+
+
+def parse_reminder(notes: str):
+    """Время напоминания из notes задачи Google: 'reminder:18:00' -> '18:00'."""
+    if not notes:
+        return None
+    m = REMINDER_RE.search(notes)
+    if not m:
+        return None
+    hh, mm = m.group(1).split(":")
+    return f"{int(hh):02d}:{int(mm):02d}"
+
+
+def check_tasks(dry_run=False):
+    """Открытые задачи Google Tasks (⛅ TODAY) с напоминанием на текущее время."""
     now = datetime.now()
     current_time = now.strftime("%H:%M")
+    today_str = now.strftime("%Y-%m-%d")
     messages = []
     try:
-        conn = get_db()
-        today_str = now.strftime("%Y-%m-%d")
-        rows = conn.execute(
-            "SELECT name, reminder, duration, priority FROM tasks "
-            "WHERE due_date = ? AND status = 'pending' AND reminder = ?",
-            (today_str, current_time)
-        ).fetchall()
-        conn.close()
-        for row in rows:
-            msg = f"⏰ Задача: {row['name']}"
-            if row["duration"]:
-                msg += f" ⏱{row['duration']}"
-            msg += f" [приоритет: {row['priority']}]"
-            messages.append(msg)
+        service = get_service()
+        tasks = fetch_open_tasks(service, TODAY_LIST_ID)
     except Exception as e:
-        print(f"⚠️ Ошибка SQLite tasks: {e}")
+        print(f"⚠️ Ошибка Google Tasks: {e}")
+        return messages
+
+    if dry_run:
+        print(f"🔎 Открытые задачи Google Tasks (⛅ TODAY): {len(tasks)}")
+        for t in tasks:
+            due = (t.get("due") or "")[:10] or "-"
+            rem = parse_reminder(t.get("notes") or "") or "-"
+            print(f"   • {t.get('title', '')} | due={due} | reminder={rem}")
+
+    for t in tasks:
+        due = (t.get("due") or "")[:10]
+        if due and due != today_str:
+            continue
+        reminder = parse_reminder(t.get("notes") or "")
+        if reminder != current_time:
+            continue
+        raw_title = t.get("title", "")
+        msg = f"⏰ Задача: {raw_title.replace('❗', '').strip()}"
+        if "❗" in raw_title:
+            msg += " [приоритет: H]"
+        messages.append(msg)
     return messages
+
+
+# ─── ПРИВЫЧКИ: Google Tasks (🌱 HABITS) ───
+
+HABITS_LIST_ID = "Y0c3NGFIRThRTnlWNFRpMg"  # 🌱 HABITS
+TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
+HOURLY_RE = re.compile(r"каждый час", re.IGNORECASE)
+HOURLY_WINDOW = (8, 22)
+
 
 def check_habits():
-    """Привычки на текущее время (из SQLite)."""
+    """Неотмеченные привычки дня из Google HABITS.
+
+    Крон зовёт скрипт раз в час (HH:00), сверяем только час:
+    «18:30 · ...» придёт в 18:00. «каждый час» — каждый час в окне 08–22.
+    """
     now = datetime.now()
-    current_time = now.strftime("%H:%M")
+    today_str = now.strftime("%Y-%m-%d")
     messages = []
     try:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT id, name, time, weekdays FROM habits WHERE time = ?",
-            (current_time,)
-        ).fetchall()
-        conn.close()
-        for row in rows:
-            weekdays = row["weekdays"] or ""
-            if is_today_right_day(weekdays):
-                messages.append(f"✅ Привычка: {row['name']}")
+        cards = fetch_open_tasks(get_service(), HABITS_LIST_ID)
     except Exception as e:
-        print(f"⚠️ Ошибка SQLite habits: {e}")
+        print(f"⚠️ Ошибка Google HABITS: {e}")
+        return messages
+    for t in cards:
+        if (t.get("due") or "")[:10] != today_str:
+            continue
+        title = (t.get("title") or "").strip()
+        if HOURLY_RE.search(title):
+            if HOURLY_WINDOW[0] <= now.hour <= HOURLY_WINDOW[1]:
+                messages.append(f"🔄 {title}")
+            continue
+        m = TIME_RE.search(title)
+        if m and int(m.group(1)) == now.hour:
+            messages.append(f"✅ Привычка: {title}")
     return messages
 
-def check_periodic():
-    """Периодические задачи — с защитой от дублей через last_sent_hour."""
-    now = datetime.now()
-    current_time = now.strftime("%H:%M")
-    current_hour = now.hour
-    messages = []
-    try:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT id, name, every, start_time, end_time, last_sent_hour "
-            "FROM periodic"
-        ).fetchall()
-        for row in rows:
-            if not (row["start_time"] <= current_time <= row["end_time"]):
-                continue
-            if row["last_sent_hour"] == current_hour:
-                continue
-            messages.append(f"🔄 Периодическое: {row['name']} (каждые {row['every']})")
-            conn.execute(
-                "UPDATE periodic SET last_sent_hour = ? WHERE id = ?",
-                (current_hour, row["id"])
-            )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"⚠️ Ошибка SQLite periodic: {e}")
-    return messages
 
 def main():
+    dry_run = ("--dry-run" in sys.argv) or ("--no-send" in sys.argv)
+    stdout_mode = "--stdout" in sys.argv  # крон Hermes --no-agent: stdout уходит в Telegram
+    msgs = check_tasks(dry_run=dry_run) + check_habits()
+    if stdout_mode:
+        if msgs:
+            print("\n".join(msgs))
+        return
     print(f"🔔 Reminders check at {datetime.now().strftime('%H:%M')} МСК")
-    all_messages = []
-    all_messages.extend(check_tasks())
-    all_messages.extend(check_habits())
-    all_messages.extend(check_periodic())
-    if all_messages:
-        text = "\n".join(all_messages)
-        print(f"📤 Отправка {len(all_messages)} уведомлений:\n{text}")
-        success = send_telegram(text)
-        print(f"{'✅' if success else '❌'} Отправлено" if success else "❌ Ошибка отправки")
+    if dry_run:
+        print("🧪 DRY-RUN (НЕ отправлено):\n" + ("\n".join(msgs) or "нет уведомлений"))
+        return
+    if msgs:
+        ok = send_telegram("\n".join(msgs))
+        print("✅ Отправлено" if ok else "❌ Ошибка отправки")
     else:
         print("✅ Нет уведомлений на этот раз")
+
 
 if __name__ == "__main__":
     main()

@@ -18,7 +18,10 @@ search_files(pattern="2026-06-*", target="files", path="/home/hermes/hermes-vaul
 read_file(path="/home/hermes/hermes-vault/Journal/2026-06-13.md")
 ```
 
-## 2. Carry-over задачи
+## 2. Задачи и просрочки (Google Tasks)
+
+Задачи читаются ТОЛЬКО из Google Tasks (источник истины с 24.09.2026).
+Локальный трекер для чтения задач не используется.
 
 ```python
 # ❌ НЕ РАБОТАЕТ (cron):
@@ -30,52 +33,26 @@ python3 << 'PYEOF' ... PYEOF
 # ❌ НЕ РАБОТАЕТ (cron): execute_code
 execute_code()
 
-# ✅ РАБОТАЕТ A: through task_display output
-# task_display.py показывает carry-over в двух форматах:
-#   (🔄 N)       — краткая запись, N = количество переносов
-#   (⚠️ N переносов)  — развёрнутая запись
-#   (📁 cat · ❗текст) — с категорией
-# Пример реального вывода (19.06.2026):
-#
-# **H**
-# - `101` Согласовать даты... *(🔄 4)*
-# - `150` 💪 Сходить в зал *(📁 health · ⚠️ 7 переносов)*
-# - `154` Продать ноут *(📁 tech · ⚠️ 6 переносов)*
-# **M**
-# - `145` Позвонить сестре *(⚠️ 13 переносов)*
-# - `153` Отвезти вещи сестре *(📁 family · ⚠️ 8 переносов)*
-# - `155` Поискать майки *(📁 shopping · ⚠️ 6 переносов)*
-# - `156` 📞 Позвонить Лиме *(📁 lima · ⚠️ 6 переносов)*
-# - `157` 🧦 Купить носки *(📁 shopping · ⚠️ 6 переносов)*
-# **L**
-# - `113` Жильё после Узбекистана *(🔄 4)*
-#
-# Regex для парсинга carry_over из task_display (grep/sed):
-#   🔄 (\\d+)       → carry_over = N (Numeric)
-#   ⚠️ (\\d+) переносов  → carry_over = N
-# Или комбинированный (оба формата):
-#   (?:🔄|⚠️) (\\d+)(?: переносов)?
+# ✅ РАБОТАЕТ A: готовый скрипт → задачи дня из Google (TODAY/BACKLOG/HABITS)
+#   открытые задачи дня, выполненные за день, backlog, привычки
+PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages \
+    /usr/bin/python3 ~/.hermes/scripts/brief_data.py            # сегодня
+PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages \
+    /usr/bin/python3 ~/.hermes/scripts/brief_data.py --yesterday
 
-# ✅ РАБОТАЕТ B: write temp .py file → run via terminal
-# = Самый надёжный способ для кастомных SQLite-запросов в cron =
-write_file(path="/tmp/carry_over.py", content="""
-import sqlite3, os
-db = os.path.expanduser('~/.hermes/tasks/tasks.db')
-conn = sqlite3.connect(db)
-rows = conn.execute("SELECT id, name, carry_over FROM tasks WHERE status='pending' AND carry_over>=2 ORDER BY carry_over DESC").fetchall()
-for r in rows:
-    print(f"[{r[0]}] {r[1][:60]} — carry_over={r[2]}")
-conn.close()
-""")
-# Затем:
-python3 /tmp/carry_over.py
+# ✅ РАБОТАЕТ B: полный список открытых/просроченных из Google
+PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages \
+    /usr/bin/python3 ~/.hermes/scripts/brief_tasks.py
 
-# ✅ РАБОТАЕТ C: через t list + parse  
-~/.local/bin/t list --all  # но это всё задачи, фильтровать grep'ом
+# ✅ РАБОТАЕТ C: форматированный список (task_display.py теперь читает Google)
+python3 ~/.hermes/scripts/task_display.py
 
-# ✅ РАБОТАЕТ D: через t status (общий счётчик)
-~/.local/bin/t status
+# ✅ РАБОТАЕТ D: кастом — временный .py с импортом get_service из tasks_api.py
+#   ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py
 ```
+
+Важно: счётчика переносов (carry_over) в Google Tasks НЕТ. «Просрочка» =
+у задачи due-дата в прошлом (`due < today`); задача без due просроченной не считается.
 
 ## 3. ⚠️ Sibling collision при write_file в /tmp/
 
@@ -88,7 +65,7 @@ but this agent never read it. Read the file before writing to avoid overwriting 
 **Причина:** Два параллельных крон-задания используют одинаковые имена `/tmp/*.py` — второй write_file перезаписывает первый до того как тот успел его прочитать.
 
 **Как избежать:**
-1. **Лучший вариант:** читай через `read_file` / `search_files` / `t CLI` — без write_file, нет shared state
+1. **Лучший вариант:** читай через `read_file` / `search_files` / готовые скрипты (`brief_data.py`) — без write_file, нет shared state
 2. **Если write_file неизбежен:** используй уникальные имена — `/tmp/cron_taskname_TIMESTAMP.py`, где TIMESTAMP — метка из TZ='Europe/Moscow' date
 3. **Чисти за собой:** `rm -f /tmp/cron_*.py` в terminal() после чтения
 
@@ -103,7 +80,7 @@ TZ='Europe/Moscow' date '+%A, %d %B %Y %H:%M'
 
 - Корень vault: `/home/hermes/hermes-vault/`
 - Дневники: `Journal/` (ENG, не русский)
-- AGENTS.md: `/home/hermes/hermes-vault/AGENTS.md`
+- AGENTS.md: `/home/hermes/hermes-vault/System/Docs/vault-rules.md`
 - Структура: Journal/, Areas/, Projects/, Learning/, Inbox/, System/, Archive/, agents-data/
 
 ## 7. Детекция пустых дневников (спячка системы)
@@ -122,9 +99,29 @@ TZ='Europe/Moscow' date '+%A, %d %B %Y %H:%M'
 # Если за 3 дня ни одного признака → SEVERE в брифинге
 ```
 
-**Пример формулировки в брифинге:**\n```\n📉 Системный провал: 3 дня сферы не оцениваются, привычки 0/11,\nрефлексия пустая, задачи не закрываются 14+ дней.\n```\n\n**Важно:** `task_display.py` показывает только задачи с `due_date <= today`.\nДля полной картины carry_over (все задачи) используй write_file + terminal SQLite-запрос.\n\n## 8. Детекция системного блока через одинаковый carry_over\n\n**Сигнал:** все pending задачи имеют одинаковый carry_over (например, все 17) И созданы в одну дату.\n\n**Что это значит:** Это не 6 отдельных просрочек, а одна системная проблема — человек блокирован и\nне решает ни одну задачу N дней подряд.\n\n**Как проверить (cron-safe):**\n1. Получить список задач через `task_display.py` (покажет carry_over у каждой)\n2. Если carry_over у всех одинаковый — выполнить write_file + terminal SQLite-запрос на created_at:\n```python\nwrite_file(path=\"/tmp/cron_batch_check_TIMESTAMP.py\", content=\"\"\"\nimport sqlite3, os\ndb = os.path.expanduser('~/.hermes/tasks/tasks.db')\nconn = sqlite3.connect(db)\nrows = conn.execute(\"SELECT id, name, carry_over, created_at FROM tasks WHERE status='pending' AND carry_over>=2 ORDER BY carry_over DESC\").fetchall()\ncreated_dates = set(r[3][:10] if r[3] else 'unknown' for r in rows)\ncarries = set(r[2] for r in rows)\nprint(f\"Задач: {len(rows)}\")\nprint(f\"Уникальных carry_over: {carries}\")\nprint(f\"Дат создания: {created_dates}\")\nfor r in rows:\n    print(f\"  [{r[0]}] {r[1][:50]} | carry={r[2]} | created={r[3][:10] if r[3] else '-'}\")\nconn.close()\n\"\"\")\npython3 /tmp/cron_batch_check_$(TZ='Europe/Moscow' date '+%H%M%S').py\n```\n\n**Если 1 дата создания + 1 carry_over = SEVERE.** Брифинг должен писать не «6 задач с carry_over», а\n«системный блок: 17 дней не сделано ни одной задачи из 6». Это важнее, чем список задач.\n\n**Пример формулировки:**\n```\n⚠️ Системный блок: все 6 задач имеют 17 переносов.\nСозданы 25 июня — 17 дней ни одна не сдвинулась.\n```
+**Пример формулировки в брифинге:**\n```\n📉 Системный провал: 3 дня сферы не оцениваются, привычки 0/11,\nрефлексия пустая, задачи не закрываются 14+ дней.\n```\n\n**Важно:** в Google Tasks счётчика переносов (carry_over) нет — просрочка определяется по due-дате (`due < today`); полный список открытых/просроченных — `brief_tasks.py` (Google TODAY/BACKLOG).
+
+## 8. Детекция системного блока через просрочки
+
+**Сигнал:** все открытые задачи из Google TODAY/BACKLOG имеют due в прошлом и не двигаются N дней.
+
+**Что это значит:** Это не N отдельных просрочек, а одна системная проблема — человек блокирован и не решает ни одну задачу N дней подряд.
+
+**Как проверить (cron-safe):**
+1. Получить список открытых задач: `PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages /usr/bin/python3 ~/.hermes/scripts/brief_tasks.py`
+2. Если почти все задачи просрочены и список не меняется — это системный блок.
+
+**Если много просроченных задач и ни одна не закрывается = SEVERE.** Брифинг должен писать не «N задач с carry_over», а «системный блок: ни одна задача не сдвинулась N дней». Это важнее, чем список задач.
+
+**Пример формулировки:**
+```
+⚠️ Системный блок: все открытые задачи просрочены.
+Ни одна не двигалась 17 дней.
+```
+
+## 9. Валидированные пути vault
 
 - Корень vault: `/home/hermes/hermes-vault/`
 - Дневники: `Journal/` (ENG, не русский)
-- AGENTS.md: `/home/hermes/hermes-vault/AGENTS.md`
+- AGENTS.md: `/home/hermes/hermes-vault/System/Docs/vault-rules.md`
 - Структура: Journal/, Areas/, Projects/, Learning/, Inbox/, System/, Archive/, agents-data/

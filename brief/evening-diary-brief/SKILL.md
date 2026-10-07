@@ -7,7 +7,7 @@ requires: [google-workspace, obsidian, vault-structure]
 
 # Вечерний бриф v3 — Живой диалог, источник = Google Tasks
 
-**⚠️ ЭПОХА 24.09.2026 (вердикт Василия): ВСЁ в Google Tasks. `t` CLI, `tasks.db`, `habit-done` — МЁТВЫ, не использовать НИГДЕ. Чтение: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (+ `--yesterday` для вчерашнего среза; PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages). Запись: `/usr/bin/python3 ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py` (complete/delete/add/patch; TODAY `VDhuNDh2enVHY1I3TlBtUQ`, BACKLOG `MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow`, HABITS `Y0c3NGFIRThRTnlWNFRpMg`).**
+**⚠️ ЭПОХА 24.09.2026 (вердикт Василия): ВСЁ в Google Tasks — единственный источник истины. Чтение: `/usr/bin/python3 ~/.hermes/scripts/brief_data.py` (+ `--yesterday` для вчерашнего среза; PYTHONPATH=/home/hermes/.local/lib/python3.12/site-packages). Запись: `/usr/bin/python3 ~/.hermes/skills/productivity/google-workspace/scripts/tasks_api.py` (complete/delete/add/patch; TODAY `VDhuNDh2enVHY1I3TlBtUQ`, BACKLOG `MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow`, HABITS `Y0c3NGFIRThRTnlWNFRpMg`).**
 
 **Назначение (по Василию, 26.08.2026):** вечерний бриф — это **небольшой живой диалог**: подбиваем задачи, планируем следующий день, пишем мысли если есть. Я — ассистент: помогаю выставить приоритеты, не упустить важное, учитываю **локации и время задач**, веду **график Василия**.
 
@@ -75,12 +75,12 @@ requires: [google-workspace, obsidian, vault-structure]
 5. **Учитывать локации/время/график** — эрранды к пути, зал по расписанию, ужин/отбой.
 6. **Закрывать/переносить сразу** — `tasks_api.py complete`/patch в момент подтверждения. Не откладывать.
 7. **Незакрытая задача** — судьбу не решили → перенести due на ЗАВТРА (patch), НЕ удалять молча, НЕ допрашивать.
-8. **Пользователь диктует задачи на завтра** — создавать сразу `tasks_api.py add` в TODAY с due-датой завтра (без `local:#` маркеров — они от эпохи t/tasks.db).
+8. **Пользователь диктует задачи на завтра** — создавать сразу `tasks_api.py add` в TODAY с due-датой завтра (без legacy-маркеров `local:#`).
 9. **Пути vault** — только `~/hermes-vault/Journal/` (англ.), не `~/obsidian/`. Загрузить `vault-structure`.
 10. **Пользователь поправил факт** — обновить и файл, и память одним пакетом.
 11. **Пользователь торопится** — сжать до минимума: «сделано X, переношу Y, план: Z».
 
 ## История
-- v3.0 (25.09.2026): чтение/запись — ТОЛЬКО Google Tasks (brief_data.py + tasks_api.py); `t`, tasks.db, habit-done вычеркнуты (вердикт Василия 24.09).
+- v3.0 (25.09.2026): чтение/запись — ТОЛЬКО Google Tasks (brief_data.py + tasks_api.py); старый локальный трекер вычеркнут (вердикт Василия 24.09).
 - v2.0 (26.08.2026): **FSM-скрипт выведен из использования** — Василий: «больше никаких скриптов, только небольшой диалог». Формат: подбивка задач → готовый план завтра → мысли. Учтены локации/время/график.
 - v1.x (08.2026): лёгкий формат (автосводка + ≤2 вопроса) — заменён этим. Старый FSM-протокол по явному запросу — `scripts/brief_evening_fsm.py`, но по умолчанию НЕ использовать.

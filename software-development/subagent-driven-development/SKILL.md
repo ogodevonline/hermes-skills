@@ -210,7 +210,7 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
   **Gotham-специфика:** если задача пишет в Obsidian vault/Knowledge Base, в `context` ОБЯЗАТЕЛЬНО передай:
   ```python
   context="""
-  Vault frontmatter rules: см. /home/hermes/hermes-vault/AGENTS.md
+  Vault frontmatter rules: см. /home/hermes/hermes-vault/System/Docs/vault-rules.md
   Каждый .md файл обязан иметь frontmatter с:
   - node_type: из списка (journal, note, plan, book, profile, log, summary, task, reflection, index...)
   - status: draft | active | done | cancelled | archived

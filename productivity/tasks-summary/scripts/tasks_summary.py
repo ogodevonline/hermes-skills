@@ -1,44 +1,65 @@
 #!/usr/bin/env python3
-"""Вывод активных задач из personal-task-tracker (SQLite)."""
-import sqlite3, os
-from datetime import datetime, date
+"""Вывод активных задач из Google Tasks (источник истины с 06.10.2026).
 
-DB = os.path.expanduser("~/.hermes/tasks/tasks.db")
+Читает открытые (needsAction) задачи из списков ⛅ TODAY и 📥 BACKLOG через
+skills/productivity/google-workspace/scripts/tasks_api.py (OAuth уже настроен,
+свой не пишем). Локальная tasks.db больше не используется.
+"""
+import os
+import sys
+from pathlib import Path
+
+HERMES_HOME = Path(os.path.expanduser("~/.hermes"))
+TASKS_SCRIPTS = HERMES_HOME / "skills" / "productivity" / "google-workspace" / "scripts"
+if str(TASKS_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(TASKS_SCRIPTS))
+from tasks_api import get_service  # noqa: E402
+
+TODAY_LIST = "VDhuNDh2enVHY1I3TlBtUQ"                 # ⛅ TODAY
+BACKLOG_LIST = "MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow"    # 📥 BACKLOG
+
+
+def fetch_open(service, tasklist):
+    """Все открытые (needsAction) задачи списка, с пагинацией."""
+    items, token = [], None
+    while True:
+        kw = {"tasklist": tasklist, "showCompleted": False, "maxResults": 100}
+        if token:
+            kw["pageToken"] = token
+        res = service.tasks().list(**kw).execute()
+        items += res.get("items", [])
+        token = res.get("nextPageToken")
+        if not token:
+            return items
+
 
 def main():
-    if not os.path.exists(DB):
-        print("❌ База задач не найдена")
+    try:
+        service = get_service()
+    except Exception as e:
+        print(f"❌ Google Tasks недоступен: {e}")
         return
 
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-    
-    # Активные: pending или те, что на сегодня
-    today = date.today().isoformat()
-    cur.execute("""
-        SELECT id, name, priority, status, due_date
-        FROM tasks
-        WHERE status IN ('pending')
-        ORDER BY
-            CASE priority WHEN 'H' THEN 0 WHEN 'M' THEN 1 WHEN 'L' THEN 2 ELSE 3 END,
-            due_date NULLS LAST,
-            id
-    """)
-    tasks = cur.fetchall()
-    conn.close()
+    active = []
+    for list_id, prefix in ((TODAY_LIST, ""), (BACKLOG_LIST, "📥 ")):
+        try:
+            for t in fetch_open(service, list_id):
+                active.append((prefix, t))
+        except Exception as e:
+            print(f"❌ Ошибка Google Tasks: {e}")
+            return
 
-    if not tasks:
+    if not active:
         print("✅ Все задачи выполнены")
         return
 
     print("📋 **Задачи:**")
-    for i, (tid, name, priority, status, due_date) in enumerate(tasks, 1):
-        pfx = {'H':'🔴','M':'🟡','L':'🟢'}.get(priority, '')
-        line = name.strip()
-        # убираем префикс [H][M][L] если есть
-        if line.startswith('[H]') or line.startswith('[M]') or line.startswith('[L]'):
-            line = line[3:].strip()
-        print(f"{i}. {pfx} {line}")
+    for i, (prefix, t) in enumerate(active, 1):
+        raw = t.get("title", "")
+        line = raw.replace("❗", "").strip()
+        mark = "🔴 " if "❗" in raw else ""
+        print(f"{i}. {mark}{prefix}{line}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

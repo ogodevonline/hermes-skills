@@ -1,5 +1,5 @@
 """Утилиты вечернего дневника: константы, t CLI, время, Obsidian."""
-import sys, json, datetime, subprocess, re, sqlite3
+import sys, json, datetime, subprocess, re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -7,7 +7,13 @@ sys.path.insert(0, str(Path.home() / ".hermes" / "scripts"))
 from obsidian_utils import write_section, commit_all, get_vault_path
 from plan_utils import parse_plan_text, save_plan as save_plan_file
 
-TASKS_DB = Path.home() / ".hermes" / "tasks" / "tasks.db"
+# Google Tasks — источник истины по задачам с 24.09.2026 (tasks.db не читается)
+sys.path.insert(0, str(Path.home() / ".hermes" / "skills" / "productivity" / "google-workspace" / "scripts"))
+from tasks_api import get_service  # noqa: E402
+
+TODAY_LIST = "VDhuNDh2enVHY1I3TlBtUQ"    # ⛅ TODAY
+BACKLOG_LIST = "MDM0ODI5NzY3OTIxMTU4MDMzOTQ6MDow"  # 📥 BACKLOG
+_TASK_SERVICE = None
 
 # ─── Константы ───
 
@@ -70,45 +76,104 @@ def filter_night_habits(habits):
         return [h for h in habits if not (h["time"] and time_passed(h["time"]))]
     return habits
 
-# ─── t CLI ───
+def _tasks_service():
+    """Ленивая инициализация Google Tasks сервиса."""
+    global _TASK_SERVICE
+    if _TASK_SERVICE is None:
+        _TASK_SERVICE = get_service()
+    return _TASK_SERVICE
 
-def run_t(*args):
-    r = subprocess.run(["t", *args], capture_output=True, text=True, timeout=10)
-    return r.stdout.strip()
+
+def _fetch_google_tasks(tasklist, **extra):
+    """Задачи списка Google Tasks (с пагинацией). extra → параметры tasks().list."""
+    out, token = [], None
+    while True:
+        kw = {"tasklist": tasklist, "showCompleted": True, "maxResults": 200, **extra}
+        if token:
+            kw["pageToken"] = token
+        res = _tasks_service().tasks().list(**kw).execute()
+        out += res.get("items", [])
+        token = res.get("nextPageToken")
+        if not token:
+            return out
+
+
+def _task_local_id(task):
+    """Числовой ID из notes `local:#N` (иначе первые 8 символов Google-ID)."""
+    m = re.search(r"local:#(\d+)", task.get("notes") or "")
+    return m.group(1) if m else (task.get("id") or "")[:8]
+
+
+def _msk_day_start_utc(date_str):
+    """Начало дня МСК (00:00) для date_str в RFC3339 UTC — аргумент completedMin."""
+    start_msk = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=MSK)
+    return start_msk.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def parse_completed_tasks(date_str):
+    """Выполненные за дату (день МСК) задачи Google из списков TODAY/BACKLOG.
+
+    showCompleted=True, showHidden=True, completedMin = начало дня МСК —
+    иначе Google скрывает выполненные задачи.
+    """
+    out = []
+    completed_min = _msk_day_start_utc(date_str)
+    for tasklist in (TODAY_LIST, BACKLOG_LIST):
+        for t in _fetch_google_tasks(tasklist, showCompleted=True, showHidden=True,
+                                     completedMin=completed_min):
+            if t.get("status") != "completed":
+                continue
+            out.append(t)
+    return out
+
 
 def parse_pending_tasks(date_str):
-    tasks = []
-    for line in run_t("list", "--date", date_str).splitlines():
-        m = re.search(r'^\s*⏳.*\[(\d+)\]\s*(.*)', line)
-        if m:
-            tasks.append({"id": m.group(1), "name": m.group(2).strip()})
-    # Also check tasks postponed from this date (carry_over > 0, due_date = tomorrow)
-    tomorrow = (datetime.datetime.strptime(date_str, "%Y-%m-%d") + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    """Задачи дня из Google Tasks (списки TODAY/BACKLOG).
+
+    Источник истины — Google (24.09.2026); локальная tasks.db не читается.
+    Возвращает открытые задачи со сроком на date_str плюс выполненные за этот
+    день (showCompleted/showHidden + completedMin = начало дня МСК).
+    В Google нет счётчика переносов, «отложенные» отдельно не досыпаются.
+    """
+    tasks, seen = [], set()
     try:
-        conn = sqlite3.connect(str(TASKS_DB))
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name FROM tasks WHERE status='pending' AND carry_over > 0 AND due_date = ?",
-            (tomorrow,)
-        )
-        for row in cur.fetchall():
-            # check not already added
-            if not any(t["id"] == str(row[0]) for t in tasks):
-                tasks.append({"id": str(row[0]), "name": row[1]})
-        conn.close()
+        # 1) открытые задачи со сроком на дату
+        for tasklist in (TODAY_LIST, BACKLOG_LIST):
+            for t in _fetch_google_tasks(tasklist, showCompleted=False):
+                if t.get("status") != "needsAction":
+                    continue
+                if (t.get("due") or "")[:10] != date_str:
+                    continue
+                tid = _task_local_id(t)
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                tasks.append({"id": tid, "name": (t.get("title") or "").strip()})
+        # 2) выполненные за сегодня (completedMin = начало дня МСК)
+        for t in parse_completed_tasks(date_str):
+            tid = _task_local_id(t)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            tasks.append({"id": tid, "name": (t.get("title") or "").strip()})
     except Exception:
         pass
     return tasks
 
-def parse_pending_habits():
+HABITS_LIST = "Y0c3NGFIRThRTnlWNFRpMg"   # 🌱 HABITS
+
+
+def parse_pending_habits(date_str=None):
+    """Неотмеченные привычки дня из Google Tasks (список HABITS, due == date_str)."""
+    date_str = date_str or datetime.datetime.now(MSK).date().isoformat()
     habits = []
-    for line in run_t("habits").splitlines():
-        m = re.search(r'^\s*⏳.*\[\s*(\d+)\]\s*(.*)', line)
-        if not m:
+    for t in _fetch_google_tasks(HABITS_LIST, showHidden=True):
+        if (t.get("due") or "")[:10] != date_str or t.get("status") == "completed":
             continue
-        full = m.group(2).strip()
-        tm = re.search(r'(\d{2}:\d{2})$', full)
-        habits.append({"id": m.group(1), "name": full, "time": tm.group(1) if tm else None})
+        full = (t.get("title") or "").strip()
+        tm = re.search(r"(\d{2}:\d{2})", full)
+        habits.append({"id": t["id"][:8], "gid": t["id"], "name": full,
+                       "time": tm.group(1) if tm else None})
     return habits
 
 # ─── Состояние JSON ───
