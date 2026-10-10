@@ -162,6 +162,33 @@ asyncio.run(main())
 1. **Privoxy**: локальный HTTP→SOCKS5 мост (`forward-socks5t / proxy:1080 .`) → Playwright использует `proxy={"server": "http://127.0.0.1:8118"}`
 2. **3proxy локально**: `proxy -p3128` перенаправляет в SOCKS5 upstream
 
+## Гео-блок по IP: диагностика и российские прокси
+
+**Заблокированный сервис отдаёт не 403, а таймаут.** MAX (VK) с зарубежного IP: DNS резолвится, но TCP :443 не открывается вообще (`http_code=000`, `time=20s`). Диагностика в три команды:
+
+```bash
+curl -s -o /dev/null -w "target http=%{http_code} t=%{time_total}\n" --max-time 20 https://<target>/
+curl -s -o /dev/null -w "control http=%{http_code}\n" --max-time 10 https://yandex.ru/   # контроль: чужие сайты живы?
+timeout 8 bash -c '</dev/tcp/<host>/443' && echo OPEN || echo BLOCKED
+```
+
+Контрольные сайты (yandex.ru, mail.ru, api.telegram.org) с того же сервера отвечают 302 → блок на стороне цели, а не у нас. Решение — exit-IP нужной страны.
+
+### Российские прокси: как брать и почём
+
+Снимай цены с калькулятора самого провайдера (рендер JS-страницы через chrome-headless-shell — см. навык web-search-scraper), не из подборок. Ориентиры (₽ за 1 IP/мес): IPv4 SHARED ~33 ₽, IPv6 ~21 ₽, выделенный IPv4 ~120 ₽ у proxy6; серверные от ~23-31 ₽ у proxy-store. Зарубежные (Webshare/FineProxy/PapaProxy) дают $0.03-0.12/IP — это цена пакета 100+ IP, минимальный чек $3-7.
+
+- Для HTTP(S)-запросов к API достаточно HTTP-прокси (CONNECT); SOCKS5 нужен только для не-HTTP протоколов.
+- Часто дешевле выходит RU VPS + 3proxy/gost (~100-150 ₽/мес за сервер с безлимитом, а не за IP).
+- Проверка купленного прокси: `curl -x http://user:pass@host:port https://api.ipify.org` (должен вернуть RU-адрес) + реальный запрос к целевому API.
+
+### MAX Bot API (частый потребитель российского IP)
+
+- база `https://platform-api2.max.ru` (с июля 2026 миграция с `platform-api.max.ru`)
+- токен в заголовке `Authorization: <token>` **без** `Bearer` — с Bearer приходит 401 «No access token»
+- поллинг `GET /updates` надёжнее вебхука: MAX отписывает подписку после 8 часов без успешного ответа endpoint'а
+- проверка прокси под MAX: `curl -x http://u:p@h:port -o /dev/null -w "%{http_code}" https://platform-api2.max.ru/me` → ждём **401** (нет токена), а не 000/таймаут.
+
 ## Pitfalls
 
 - **Cloudflare** банит дата-центры (Hetzner, OVH) — нужны residential для таких сайтов
@@ -170,3 +197,5 @@ asyncio.run(main())
 - **Health-check обязателен** — иначе мёртвые VPS тихо роняют коннекты
 - **Auth обязателен на публичном IP** — иначе любой может юзать твой SOCKS5
 - **Threads тест**: дата-центр VDSka (AS50053, Нидерланды) проходит. Если нужны российские IP — нужны VPS у Selectel/Timeweb/Beget
+- **Гео-блок бывает на уровне TCP (000/таймаут), а не HTTP-кодом.** Не считай сервис «сломанным» и не ищи капчу — сначала проверь контрольный сайт с того же хоста.
+- **$/IP на лендинге = цена пакета.** Перед рекомендацией смотри минимальный заказ и минимальный платёж, иначе совет окажется в разы дороже ожиданий пользователя.
