@@ -371,3 +371,12 @@ C) {option}
 | `english-segment.py <url>` | Разбить YouTube на сегменты 500-700 слов | `~/.venv/bin/python` |
 | `english-next-chunk.py <slug>` | Взять следующий сегмент | `~/.venv/bin/python` |
 | `english-complete-chunk.py <slug> [N]` | Отметить сегмент завершённым | `~/.venv/bin/python` |
+
+## Жёсткие правила владельца (не нарушать)
+
+- **Two-phase, zero LLM в раздаче.** Сначала сгенерировать ВСЁ (vocab + story + questions) → сохранить в файлы → только потом выдавать по шагам из файлов. Не генерировать урок на ходу во время диалога.
+- **RAW transcript ≥ 1500 слов** на урок — не ужимать и не пересказывать исходник.
+- **Всё на английском**, кроме перевода слов. Никаких русских пояснений в story/quiz/comprehension.
+- **Слова по одному сообщению**: word + translation + definition + example. Не списком.
+- **`vocab.md`**: word + trans + def + ex. **`questions.md`**: секции quiz / comprehension / translations.
+- **Ответ «all clear»** от Василия = переходить к grammar, а не заканчивать урок.

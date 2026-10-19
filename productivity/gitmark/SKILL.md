@@ -136,3 +136,15 @@ Separate FTS5 indexer for Hermes system files. Covers .md, .yaml, .py, .toml, .j
 ### Telegram file delivery
 - **`source .env` breaks tokens with `*`.** Bash glob expands `***`. Read via Python `startswith()` + `split('=',1)`.
 - **Write a reusable `send_gotham.py` script** instead of crafting curl commands each time. Saves iterations.
+
+## ПОРЯДОК ПОИСКА (обязательный)
+
+Перед любым `grep`/`search_files` по знаниям:
+
+1. **`hms "<запрос>"`** — система Hermes (`~/.hermes`, код, конфиги, скиллы)
+2. **`gms "<запрос>"`** — vault владельца (`~/hermes-vault`)
+3. **`search_files`** — только если первые два пусты
+
+Причина: FTS5-индекс находит по смыслу и синонимам там, где `grep` требует точную подстроку, и не тонет в 1300+ системных файлах.
+
+Сгенерированный HTML-граф/карту открывать через `file://` — CDN в этом окружении недоступен, внешние скрипты не подгрузятся.
