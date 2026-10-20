@@ -75,7 +75,8 @@ def init_db():
     CREATE TABLE IF NOT EXISTS transactions(
       id INTEGER PRIMARY KEY, date TEXT, month TEXT, account TEXT, card TEXT,
       sber_cat TEXT, category TEXT, amount REAL, balance_after REAL,
-      payee TEXT, source TEXT, UNIQUE(date, account, amount, payee)
+      payee TEXT, source TEXT, occ INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(date, account, amount, payee, occ)
     );
     CREATE TABLE IF NOT EXISTS budgets(category TEXT PRIMARY KEY, monthly REAL);
     CREATE TABLE IF NOT EXISTS accounts(
@@ -97,10 +98,15 @@ def import_file(c, path):
         c.execute("""INSERT OR REPLACE INTO accounts
                      (account, card, balance, debt, credit_limit, asof, source)
                      VALUES (?,?,?,?,?,?,?)""",
-                  (hdr["account"], hdr["card"], hdr.get("end_balance"),
+                  (hdr["account"], hdr["card"],
+                  next((t["balance_after"] for t in tx if t.get("balance_after") is not None), hdr.get("end_balance")),
                    hdr.get("debt"), hdr.get("credit_limit"), hdr["period"][1],
                    Path(path).name))
+    seen = Counter()  # порядковый номер одинаковых строк внутри выписки: 4× «Яндекс 314,15» — 4 строки
     for t in tx:
+        occ_key = (t["date"], hdr["account"], round(t["amount"], 2), t["payee"])
+        occ = seen[occ_key]
+        seen[occ_key] += 1
         # сверка: та же сумма/направление, ТОЧНО та же дата (ручная запись
         # всегда за текущий день МСК — см. ledger_add.py), ещё не сверена
         m = c.execute(
@@ -135,10 +141,10 @@ def import_file(c, path):
         cur = c.execute(
             """INSERT OR IGNORE INTO transactions
                (date, month, account, card, sber_cat, category, amount,
-                balance_after, payee, source) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                balance_after, payee, source, occ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (t["date"], t["date"][:7], hdr["account"], hdr["card"], t["category"],
              to_cat(t["category"], t["payee"]), t["amount"], t["balance_after"],
-             t["payee"], Path(path).name))
+             t["payee"], Path(path).name, occ))
         n_new += cur.rowcount
     return hdr, n_new, len(skipped), n_rec
 

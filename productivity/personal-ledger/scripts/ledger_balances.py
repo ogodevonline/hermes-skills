@@ -21,7 +21,8 @@ CASH_KEY = "CASH"
 
 def _order_key(t):
     # банковские строки без времени идут раньше ручных того же дня
-    return (0, t["id"]) if not t["time"] else (1, t["id"])
+    # с временем — хронологически (выписка Сбера идёт от новых к старым, поэтому id-порядок врёт)
+    return (0, 0, t["id"]) if not t["time"] else (1, t["time"], t["id"])
 
 
 def _account_snapshots(tx, acc):

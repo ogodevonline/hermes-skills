@@ -31,6 +31,13 @@ def load():
         "SELECT name,target,deadline,note FROM goals")]
     accounts = [dict(r) for r in c.execute(
         "SELECT account, card, balance, debt, credit_limit, asof FROM accounts")]
+    # CASH: якорь (balance на asof) + ручные наличные после даты якоря (внесения, траты)
+    for a in accounts:
+        if a["account"] == "CASH" and a["asof"]:
+            after = c.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE account='CASH' AND date > ?",
+                (str(a["asof"])[:10],)).fetchone()[0]
+            a["balance"] = round((a["balance"] or 0) + after, 2)
     for a in accounts:  # asof: ISO или д.м.г -> "дд.мм"
         d = (a["asof"] or "").strip()
         a["asof"] = f"{d[8:10]}.{d[5:7]}" if len(d) == 10 and d[4] == "-" else d[:5]

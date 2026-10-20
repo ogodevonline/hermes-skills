@@ -101,7 +101,7 @@ function openCat(cat){
 function closeCat(){$('catModal').hidden=true;}
 $('catModal').onclick=e=>{if(e.target.id==='catModal')closeCat();};
 function totals(){
-  const debits=ACCOUNTS.filter(a=>a.account!=='CASH'&&!a.debt).reduce((s,a)=>s+(a.balance||0),0);
+  const debits=ACCOUNTS.filter(a=>a.account!=='CASH'&&a.debt==null).reduce((s,a)=>s+(a.balance||0),0);
   const cash=(ACCOUNTS.find(a=>a.account==='CASH')||{}).balance||0;
   const debt=ACCOUNTS.reduce((s,a)=>s+(a.debt||0),0);
   return {debits,cash,avail:debits+cash,debt,net:debits+cash-debt};
@@ -112,7 +112,7 @@ function renderBanner(){
     `<div class="bcard tot"><b>${fmtK(t.avail)}</b><span>доступно</span></div>`
     +`<div class="bcard debt"><b>${fmtK(t.debt)}</b><span>долг кредитки</span></div>`
     +`<div class="bcard"><b class="${t.net>=0?'pos':'neg'}">${fmtK(t.net)}</b><span>нетто всё</span></div>`
-    +ACCOUNTS.filter(a=>!a.debt).map(a=>
+    +ACCOUNTS.filter(a=>a.debt==null).map(a=>
     `<div class="bcard"><b>${fmtK(a.balance)}</b><span>${a.card||''}</span></div>`).join('');
   syncTopH();  // баннер мог сменить число строк — сразу пересчитаем высоту шапки
 }
