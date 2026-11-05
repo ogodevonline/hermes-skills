@@ -72,6 +72,16 @@ hermes --profile <name> config set delegation.model "deepseek/deepseek-v4-flash:
 - Named profiles do **NOT** inherit `.env` from the root -- copy keys manually.
 - Cron jobs snapshot their model at creation time; update stale jobs explicitly with `hermes cron update <id> --model ... --provider ...`.
 - Kilo Gateway offers `:discounted` model endpoints (e.g., `deepseek/deepseek-v4-flash:discounted`) — >40% off on Flash. Query `GET https://api.kilo.ai/api/gateway/models` for full model catalog with pricing. ⚠️ Discounted endpoints log prompts/outputs — not for sensitive data.
+- **Subagents (delegate_task) die in seconds with `HTTP 402 … credits exhausted`** → the `delegation.*` provider (Kilo) is out of credits; main chat may still work on another provider. Switch delegation to the main Anthropic subscription and clear the custom endpoint so children inherit the main creds:
+  ```bash
+  hermes config set delegation.model claude-haiku-5-5
+  hermes config set delegation.provider anthropic
+  hermes config set delegation.base_url ""
+  hermes config set delegation.api_key ""
+  ```
+  Kanban profiles carry their own `model.*` (check with `for p in $(ls ~/.hermes/profiles); do hermes -p $p config get model.default; done`) — they hit the same 402; ask before switching them too.
+- **After any background `delegate_task` dispatch, read the live transcripts once (~20 s later) before ending the turn:** `grep -h "final" ~/.hermes/cache/delegation/live/<deleg_id>/task-*.log`. A child that fails on the first API call (402/401) delivers nothing, so the user is left waiting with no result; catch it immediately and either fix the provider or do the work inline.
+- **Children finished (`final status=completed`) but their summaries never arrived in chat** → the live log truncates the text (`…(+N chars)`); read the full final answers from the session DB instead of re-running the work: in `execute_code`, `sqlite3.connect('~/.hermes/state.db')` → `SELECT id, content FROM messages WHERE role='assistant' AND content LIKE '<first words of the final line from task-N.log>%'`. (`sqlite3` CLI may be absent; Python's module works.)
 - Never use `patch` on `config.yaml` for multi-section changes — it creates duplicate YAML sections AND the protected-file guard refuses it, triggering retry loops. **Always use `hermes config set`** for any config.yaml change. If you need to change multiple keys, do them one by one with `hermes config set`.
 
 ---

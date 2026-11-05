@@ -75,6 +75,7 @@ metadata:
 | 🟢 Admin/Cleanup | архивация навыков, удаление тестовых файлов, удаление cron-задач, memory compress, чистка доски после тестов, **запуск clean-disk.sh**, `sudo journalctl --vacuum`, `apt clean` | **Сам.** 1-3 tool calls. Механическая работа, не требует анализа. НЕ передавать в Kanban. НЕ delegate_task. НЕ суб-агенты. Без вопросов, без плана, без approval — просто сделать. Если есть сомнения — сделай, не спрашивай. |
 
 **Триггер «без канбанов / щас / в этом чате / мат на медлительность»:** Если пользователь сказал «без канбанов», «просто щас исправь», «в этом чате блядь» или матерится про скорость/бюрократию — это Admin/Cleanup. Делай сам, мгновенно, в этом же чате. Никакого Kanban, никакого delegate_task, никаких планов на approval. |
+| 🟢 **Errand lookup в живом диалоге** | «где почистить ноут и кому продать», «есть ли в отеле бассейн», цена б/у модели | **Сам, 1–3 поиска/extract, сразу в ответ.** Пользователь ждёт в чате и пишет «ну что???» через минуту — фон/Kanban здесь медленнее и бесит. Делегируй только многонаправленный ресёрч (3+ независимых тем). |
 | 🔴 **Research** (поиск фактов, цен) | найти курс валют, погоду, цены, сравнить товары | **Kanban → researcher.** НИКОГДА не использовать web_search/web_extract сам. Даже погода — Kanban. ❌ **НЕ для глубокого исследования** локальных файлов, архитектуры, структуры проекта — это делаю сам (file/terminal/tools) или через self-improver. researcher — только веб-факты. |
 | 🟡 Code Analysis | понять код, найти функцию, трассировать вызов | **delegate_task → explorer** (read-only, file+terminal+session_search, max_turns=10). Быстрее Kanban — без диспатча и SQLite. Если нужно писать код → Kanban → coder. |
 | 🔴 Code/Feature | написать код, починить баг, добавить фичу | **Kanban → coder/debugger.** НЕ пишу код сам |
@@ -890,6 +891,15 @@ result = delegate_task(
 - В goal/context суб-агента явно укажи: "Перебери каждую дату в диапазоне. Найди минимальную цену на ЛЮБУЮ из этих дат."
 - Если суб-агент сделал только одну дату — это баг. Исправь на следующем запуске.
 
+### Background delegate_task: проверить старт и забрать результат самому
+
+Пользователь нетерпелив («ну что???»). Фоновые результаты доходят только между ходами, и я не должен на это полагаться.
+
+1. **Через ~20 с после spawn проверь старт:** `grep -h "final\|error" ~/.hermes/cache/delegation/live/<deleg_id>/task-*.log`. Если там `status=failed` за секунды (HTTP 402 billing, auth), значит, все дети мертвы. Сразу переключи модель делегирования (`hermes config set delegation.model <m>`, `delegation.provider <p>`, а пустые `delegation.base_url`/`delegation.api_key` = взять ключи основного провайдера), перезапусти и одной строкой скажи пользователю. Не жди, пока он сам спросит.
+2. **Если `delegate_task(action='list')` пуст, а результата в чате нет — дети уже закончили.** Live-лог обрезает итоговый текст (`…(+N chars)`), а полный финальный ответ ребёнка лежит в `~/.hermes/state.db`. Через execute_code: `sqlite3.connect(...).execute("select id, content from messages where role='assistant' and content like '<начало итога>%' order by id")` (sqlite3 CLI может отсутствовать — используй python).
+3. Не отвечай «результаты придут следующим сообщением», если их можно достать сейчас: достань и сразу выдай сводку.
+4. В сводке разделяй подтверждённое источником и то, что ребёнок пометил «не подтверждено». Цены «от X» без дат подавай именно так, а не как цену на даты.
+
 ### ⚠️ Provider inheritance pitfall
 Subagent наследует model/provider от родителя, НЕ из профиля (researcher/coder и т.д. НЕ читается). Если у родителя DeepSeek, а DeepSeek тупит — subagent тоже будет тупить, даже если профиль researcher настроен на KiloCode. Фикс: `delegation` override в config.yaml. Подробно — скилл `sub-agents-orchestrator` раздел "Важно: Subagent наследует provider от родителя".
 
@@ -1132,7 +1142,7 @@ web-tools extract <url> --timeout 20      # таймаут на URL
   --sortby <SORTBY>       rlv (relevance, default), tm (time)
 ```
 
-**Правило:** `terminal("web-tools search ...")` приоритетнее встроенного `web_search()`. Если web-tools недоступен — fallback на:
+**Правило:** `terminal("web-tools search ...")` приоритетнее встроенного `web_search()`. Если yandex-источник вернул «Яндекс XML временно отключен» (у XMLStock есть окно работы), сразу переходи на `-s duckduckgo` или встроенный `web_search`: `-s google` по русским запросам даёт мусор. Детям в context прописывай этот fallback явно. Если web-tools недоступен — fallback на:
 
 **Fallback: DuckDuckGo (ddgs)** — поиск, `web_extract` НЕ работает (search-only).
 ```bash
@@ -1226,7 +1236,7 @@ echo '<url>' | python3 /home/hermes/.hermes/scripts/web_extract.py
 
 Перед отправкой любого ответа — быстрая проверка:
 
-1. **Это research?** — Если в ответе есть данные из интернета (цены, факты, сравнения, погода) — должна быть Kanban-карточка на researcher (или delegate_task → Searcher как fallback). Если нет → переделай.
+1. **Это research?** — Если в ответе есть данные из интернета (цены, факты, сравнения, погода) — должна быть Kanban-карточка на researcher (или delegate_task → Searcher как fallback). Если нет → переделай. Исключение — errand lookup в живом диалоге (см. таблицу §1): 1–3 запроса делаю сам, с источником у каждого факта.
 2. **Использовал web_search сам?** — Если да, и это не внутренний факт (время сервера, путь файла) — это баг. Отменяй, создавай Kanban на researcher.
 3. **Использовал web_extract?** — Если да и это не внутренняя ссылка — ты ТУПИШЬ. web_extract медленный. Переделай через Kanban → researcher с запретом web_extract.
 4. **Результат от Kanban/subagent?** — Если ответ пользователю содержит research-данные, но ни researcher в Kanban, ни Searcher в delegate_task не вызывались — это косяк. Признай, переделай.
