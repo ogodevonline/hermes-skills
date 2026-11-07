@@ -1,7 +1,7 @@
 ---
 name: mytasks
 category: productivity
-description: Use when user asks «что по задачам» or /mytasks. Показать задачи Google Tasks и сразу применить его апдейты (закрыть/переписать/добавить + Календарь).
+description: Use when user asks «что по задачам», «что на сегодня» or /mytasks. Показать задачи Google Tasks (+ Календарь на день) и сразу применить его апдейты.
 ---
 
 # Tasks Summary
@@ -18,6 +18,16 @@ description: Use when user asks «что по задачам» or /mytasks. По
 ```bash
 python3 ~/.hermes/skills/productivity/tasks-summary/scripts/tasks_summary.py
 ```
+
+### «Что на сегодня» = задачи + Календарь дня
+
+Вопрос про день («что у нас на сегодня», «что сегодня») — одним заходом: `TZ=Europe/Moscow date`, `tasks_summary.py` и события Календаря за сутки (workdir = scripts google-workspace):
+
+```bash
+python3 google_api.py --account svaaugust calendar list --start 2026-11-06T00:00:00+03:00 --end 2026-11-07T00:00:00+03:00 --max 30
+```
+
+Ответ: задачи, сгруппированные по срочности (горит до ближайшего события / 🔴 не горит / фон), затем только **оставшиеся** на сегодня события Календаря (прошедшие утренние привычки — одной строкой). Учитывай режим дня (зал Пн/Ср/Пт утром). В конце — один вопрос «что уже сделано?».
 
 ## Формат вывода
 
