@@ -86,6 +86,12 @@ hermes --profile <name> config set delegation.model "deepseek/deepseek-v4-flash:
 
 ---
 
+## 1a. Recall a Past Session
+
+**Full detail:** `references/session-history-recall.md` — когда пользователь ссылается на «прошлую сессию» и нет инструмента поиска по истории: Python sqlite3 по `~/.hermes/state.db` (sessions + messages), ранжировать по числу совпадений, не по заголовку.
+
+---
+
 ## 1b. External LLM-Proxy / Memory Hub Integration (e.g. TencentDB Agent Memory)
 
 **Full detail:** `references/tencentdb-agent-memory.md`

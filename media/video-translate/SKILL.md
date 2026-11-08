@@ -27,7 +27,8 @@ metadata:
 - `yt-dlp` — `uv tool install yt-dlp` (бинарь в `~/.local/bin/yt-dlp`).
 - `ffmpeg` — системный (обычно `/usr/bin/ffmpeg`).
 - `faster-whisper` — **НЕ ставить в venv Hermes**. Отдельный venv:
-  `uv venv /tmp/whisper_venv && uv pip install --python /tmp/whisper_venv/bin/python faster-whisper`
+  `uv venv /tmp/whisper_venv && uv pip install --python /tmp/whisper_venv/bin/python faster-whisper "av<16"`
+  (без `av<16` падает: `open() got an unexpected keyword argument 'metadata_errors'`; /tmp venv может исчезнуть — проверяй наличие перед запуском)
 - Модели whisper (tiny/base/small) кешируются в `~/.cache/huggingface/hub/models--Systran--faster-whisper-*` — после первой загрузки распознавание почти бесплатное.
 
 ## How to Run
