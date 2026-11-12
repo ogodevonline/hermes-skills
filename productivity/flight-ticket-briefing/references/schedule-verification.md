@@ -21,6 +21,23 @@ for fl in d["flights"].values():
               datetime.fromtimestamp(dep, loc).strftime("%a %d.%m %H:%M") if dep else "-")
 ```
 
+## Live status: «прилетел ли самолёт?»
+
+Same fa.html, quick grep is enough (no parser needed):
+
+```bash
+grep -o '"flightStatus":"[^"]*"\|"landingTimes":{[^}]*}\|"gateArrivalTimes":{[^}]*}\|"cancelled":[a-z]*\|"diverted":[a-z]*' fa.html | head
+TZ=Europe/Moscow date -d @<epoch> "+%d.%m %H:%M"   # convert each epoch
+```
+
+- The FIRST block of matches = the current/latest flight; later blocks are past days.
+- `landingTimes.actual` = wheels-on (the answer to «сел?»). `gateArrivalTimes.actual` is often null for a while — report the estimate as «к выходу ~HH:MM».
+- `takeoffTimes` may just mirror scheduled (scheduled = estimated = actual) — do not quote it as the real departure.
+- `"terminal":"A"` fields are not clearly tied to origin vs destination — say the terminal is unconfirmed and point to the airport board.
+- Always run `TZ=Europe/Moscow date` first and compare with landing time.
+
+## Past-flight history
+
 - activityLog = recent past flights; print the weekday — schedules often differ by weekday, compare the SAME weekday as the ticket.
 - One same-weekday past flight at another time is NOT proof of a schedule change (could be a one-off or a different rotation). Before alarming the user, check mail for the agency pre-departure reminder (OneTwoTrip «Полезная информация по вашему скорому перелёту», often in SPAM): it is generated from the live booking 1–2 days before departure, so if it was sent after the deviating flight and shows the ticket time, the time stands. Only a schedule-change mail or the airline's «Управление бронированием» overrides it.
 - ICAO prefixes: Pobeda PBD, Aeroflot AFL, Uzbekistan Airways UZB, S7 SBI, Utair UTA.

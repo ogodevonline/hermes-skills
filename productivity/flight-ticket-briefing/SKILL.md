@@ -1,6 +1,6 @@
 ---
 name: flight-ticket-briefing
-description: Use when найти билет в почте и объяснить вылет пассажиру.
+description: Use when билет в почте, статус рейса, встреча в аэропорту.
 ---
 
 # Flight ticket briefing
@@ -22,6 +22,14 @@ Class: someone (Василий or a relative/близкий) flies; find the tic
 4. **Check-in / printing rules** — from the airline's official page, per departure airport (Pobeda: `references/pobeda-checkin.md`). Decide from fare: no seat selected → no online check-in → desk check-in, boarding pass printed at the desk, nothing to print at home.
 5. **Arrival-at-airport time** = desk opening time per airline rules (not the agency's generic "за 3 часа на международные") minus ~30 min buffer for entrance screening.
 6. **Deliver**: ready-to-forward message + `MEDIA:` ticket PDF. Writing to the passenger directly (Telegram/email) only after the user's OK on the text.
+
+## Arrival day: «прилетел?» / встреча пассажира
+
+1. Status from FlightAware (`references/schedule-verification.md` § Live status): landed time + gate ETA, in MSK for Moscow arrivals.
+2. Then the practical timeline from wheels-on: international arrival (from Uzbekistan etc.) = bus from remote stand (Pobeda often) → passport control (the long part) → baggage → customs green channel → meeting hall. Typical exit 30–60 min after landing. «Прибыл» on the board means only landed.
+3. Vnukovo: arrivals hall is terminal A, floor 1, international zone has its own exit; confirm terminal on the live board (vnukovo.ru) — sources disagree (some old ones mention terminal B for Central Asia).
+4. Passenger's phone/roaming often doesn't work: advise standing at the international arrivals exit, pre-sending a «жду у выхода» message for when she catches Wi-Fi; offer to send it only after the user OKs the text.
+5. Heavy luggage → suggest taxi over metro transfers; Aeroexpress Vnukovo→Kievsky is direct, the pain is transfers after it. Don't quote Aeroexpress prices/schedule without checking.
 
 ## Output rules (user preferences)
 
