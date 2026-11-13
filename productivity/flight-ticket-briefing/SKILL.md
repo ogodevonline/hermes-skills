@@ -1,6 +1,6 @@
 ---
 name: flight-ticket-briefing
-description: Use when билет в почте, статус рейса, встреча в аэропорту.
+description: Use when билет в почте, рейс, встреча, даты выездов/ВНЖ.
 ---
 
 # Flight ticket briefing
@@ -30,6 +30,10 @@ Class: someone (Василий or a relative/близкий) flies; find the tic
 3. Vnukovo: arrivals hall is terminal A, floor 1, international zone has its own exit; confirm terminal on the live board (vnukovo.ru) — sources disagree (some old ones mention terminal B for Central Asia).
 4. Passenger's phone/roaming often doesn't work: advise standing at the international arrivals exit, pre-sending a «жду у выхода» message for when she catches Wi-Fi; offer to send it only after the user OKs the text.
 5. Heavy luggage → suggest taxi over metro transfers; Aeroexpress Vnukovo→Kievsky is direct, the pain is transfers after it. Don't quote Aeroexpress prices/schedule without checking.
+
+## Travel history / days abroad
+
+For «сколько ещё можно отсутствовать», «даты выездов за год» (ВНЖ 6-month rule, annual notification): reconstruct legs from mail and compute against the law — `references/travel-history-from-mail.md`. Give the number with its assumption («если с января по июнь не выезжала») and a safe margin, never a bare figure.
 
 ## Output rules (user preferences)
 

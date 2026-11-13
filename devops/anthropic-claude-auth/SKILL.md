@@ -166,6 +166,13 @@ hermes -p <name> chat -q "OK"               # проверка живым зап
 - OAuth-идентичность работает только на нативном антроповском роуте (provider `anthropic` / host `api.anthropic.com`): сторонние Anthropic-совместимые эндпоинты на Claude Code-заголовках отдают 401/403.
 - Протухший OAuth без валидных Claude Code кредов → `hermes model` считает, что кредов нет, и предлагает re-auth. Это ожидаемо, не баг.
 
+### Быстрая диагностика «обнови ключ Claude» / «не дождался ответа»
+
+1. **Статус пула** — источник правды `~/.hermes/auth.json` → `credential_pool.anthropic[]`: у каждой записи `label`, `source`, `last_status` (`ok`/`dead`), `last_error_reason`/`last_error_message`, `expires_at_ms`. Печатай только эти поля небольшим python-скриптом (токены не выводить); `read_file` на credential-сторы запрещён по дизайну. Не придумывай других путей хранения — креды лежат только в auth.json, `.anthropic_oauth.json` и `~/.claude/.credentials.json`.
+2. **Почему не было ответа** — `~/.hermes/logs/errors.log`, искать `credential_pool`/`401`/`revoked`/`APITimeoutError`. `OAuth access token has been revoked` = non-retryable: ход обрывается без ответа пользователю. Назови ему причину с временем из лога.
+3. **После ре-авторизации** (в т.ч. когда пользователь сам пишет «я настроил») — сразу проверь пул тем же скриптом и подтверди одной строкой фактом, а не общими советами «если что — пиши». Новая запись появляется как `anthropic-oauth-N` с заполненным `expires_at_ms`, старые остаются `dead`. Проверь `~/.claude/.credentials.json` и `~/.hermes/.anthropic_oauth.json`: если там старый токен с `expiresAt: null`, запись `claude_code` в пуле лишь выглядит `ok` (её ещё не пробовали) — предложи переписать его новыми токенами (`scripts/claude_code_credentials.py`) и убрать dead-записи.
+4. «Обновить API-ключ для Claude» у пользователя с подпиской = новый OAuth-логин (Шаг 2), а не `ANTHROPIC_API_KEY` в `.env` (см. питфолл 6). Ответ — коротко: что мёртвое и почему + ссылка шага 1, без меню «вариант А/Б» и таблиц.
+
 ## Pitfalls
 
 1. **`claude setup-token` требует подписку Claude Pro/Max.** Для API-ключевого аккаунта выбирай в `hermes model` вариант «Anthropic API key» — иначе поток упадёт в браузере.
