@@ -30,7 +30,8 @@ Class: remote, step-by-step troubleshooting of a physical machine (Windows insta
 2. Pick the cheapest decisive diagnostic not yet done.
 3. One step → wait for photo → interpret → next.
 4. Before interpreting a result, check the photo's command history/versions to confirm the step was actually done (e.g. same cmd window + DISM 26100 = he did NOT reboot into the other ISO). If not, say so in one line and re-issue only that step.
-5. «media driver missing» while diskpart sees the SSD → test the image: `dism /get-imageinfo` on install.wim; Error 13 «data is invalid» (also on a copy to SSD) = corrupt ISO, not drivers/Ventoy.
+5. «media driver missing» while diskpart sees the SSD → test the image: `dism /get-imageinfo` on install.wim; Error 13 «data is invalid» = install.wim unreadable, not drivers. A copy to SSD made FROM the same stick proves nothing. Error 13 on TWO different ISOs → suspect the USB stick itself; decisive test on Linux: `sha256sum` the ISO twice (different sums = flaky stick).
+   - Ventoy ISO drive letter changes per boot (E: → F:); find it first: `for %d in (C D E F G H I) do @if exist %d:\sources\install.* dir %d:\sources\install.*`
 6. When the evidence says a GUI tool's error is false (e.g. installer says driver missing but diskpart sees the disk), stop fighting the GUI and bypass it.
 
 ## References
